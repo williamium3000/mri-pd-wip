@@ -1,0 +1,5 @@
+data
+pretrained
+exp
+*.pyc
+.hfai

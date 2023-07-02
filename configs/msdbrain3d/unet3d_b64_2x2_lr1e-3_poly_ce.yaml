@@ -1,0 +1,41 @@
+# arguments for dataset
+dataset: MSDBrain
+nclass: 4
+crop_size: 128
+img_root: data/Task01_BrainTumour/imagesTr
+mask_root: data/Task01_BrainTumour/labelsTr
+
+# arguments for training
+optim: SGD
+epochs: 100
+batch_size: 2
+lr: 0.001  # 2GPUs
+lr_multi: 0.0
+criterion:
+  name: CELoss
+  kwargs:
+    ignore_index: 255
+
+eval_mode: original
+scheduler: 
+  name: PolynomialLR
+  kwargs:
+    power: 0.9
+lr_decay_per_epoch: False
+lr_decay_per_step: True
+
+# arguments for backbone
+backbone:
+  name: UNet3D
+  kwargs:
+    in_channels: 4
+    base_channels: 64
+    bilinear: True
+
+# arguments for decode_head
+decode_head:
+  name: FCN3DHead
+  kwargs:
+    channels: 64
+    num_convs: 0
+    concat_input: False

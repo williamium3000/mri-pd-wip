@@ -1,0 +1,1 @@
+CLASSES = {'MSDBrain': ["background", "edema", "non-enhancing tumor", "enhancing tumour"]}
