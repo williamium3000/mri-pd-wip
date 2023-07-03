@@ -1,0 +1,34 @@
+# arguments for dataset
+nclass: 4
+crop_size: 128
+pd_root: data/pd_wip/pd_nifti_final/train2d
+wip_root: data/pd_wip/wip_registration_nifti/train2d
+
+# arguments for training
+optim: AdamW
+epochs: 50
+batch_size: 64
+lr: 0.0002  # 1GPUs
+lr_multi: 0.0
+
+# scheduler: 
+#   name: PolynomialLR
+#   kwargs:
+#     power: 0.9
+# lr_decay_per_epoch: False
+# lr_decay_per_step: True
+lambda_L1: 1.0
+generator: {
+  input_nc: 1,
+  output_nc: 1,
+  ngf: 64, 
+  netG: "unet_64",
+  norm: "instance"
+}
+
+discriminator: {
+  input_nc: 2, # conditional 
+  ndf: 64, 
+  netD: "basic",
+  norm: "instance"
+}

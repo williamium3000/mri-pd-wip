@@ -91,7 +91,7 @@ class RemoveBackgroundSlices():
 
     def __call__(self, input):
         image, mask = input[0], input[1]
-        assert len(image.shape) == 4, "ExtractRegion3D only works on 3D images (4D tensor)"
+        assert len(image.shape) == 4, "RemoveBackgroundSlices only works on 3D images (4D tensor)"
         
         # drop slices without any label
         z_mask = np.any(mask != self.id, axis=(0, 1))  

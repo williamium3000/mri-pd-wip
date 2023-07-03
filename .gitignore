@@ -3,3 +3,4 @@ pretrained
 exp
 *.pyc
 .hfai
+work_dirs
