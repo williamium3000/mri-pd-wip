@@ -13,26 +13,23 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 
 
-class Medical3DDataset(Dataset):
-    def __init__(self, cfg, mode, img_root, label_root, list):
+class PDWIP3DDataset(Dataset):
+    def __init__(self, cfg, mode, pd_root, wip_root, list, return_name):
         self.mode = mode # train or val
-        self.img_root = img_root
-        self.label_root = label_root
+        self.pd_root = pd_root
+        self.wip_root = wip_root
+        self.return_name = return_name
         self.list = list
         with open(list, "r") as f:
             filenames = f.readlines()
-        images = []
-        for filename in filenames:
-            images.append(
-                os.path.join(img_root, filename.strip() + ".nii.gz")
-            )
-        self.images = images
-        labels = []
-        for filename in filenames:
-            labels.append(
-                os.path.join(label_root, filename.strip() + ".nii.gz")
-            )
-        self.labels = labels
+        pd_images = []
+        wip_images = []
+        for line in filenames:
+            pd_file, wip_file = line.strip().split(" ")
+            pd_images.append(os.path.join(pd_root, pd_file))
+            wip_images.append(os.path.join(wip_root, wip_file))
+        self.pd_images = pd_images
+        self.wip_images = wip_images
         
         if mode == "train":
             self.transform = transforms.Compose([
@@ -57,15 +54,23 @@ class Medical3DDataset(Dataset):
         
 
     def __getitem__(self, item):
-        img_path = self.images[item]
-        mask_path = self.labels[item]
-        img = nib.load(img_path).get_fdata() # (X, Y, Z, C)
-        mask = nib.load(mask_path).get_fdata().astype(np.uint8)
-        
-        img, mask = self.transform((img, mask))
-        
+        pd_path = self.pd_images[item]
+        wip_path = self.wip_images[item]
+        # X, Z, Y
+        pd_img = nib.load(pd_path).get_fdata().transpose(0,2,1)[:, :, :, np.newaxis] # (X, Y, Z, C)
+        wip_img = nib.load(wip_path).get_fdata().transpose(0,2,1)[:, :, :, np.newaxis]
 
-        return img, mask
+        # pd_img = self.transform(pd_img).float()
+        # wip_img = self.transform(wip_img).float()
+        # pd max:  1762.0
+        # wip max:  1848.0
+        pd_img = torch.tensor(pd_img).permute(3, 0, 1, 2).float() / 1762.0
+        wip_img = torch.tensor(wip_img).permute(3, 0, 1, 2).float() / 1848.0
+        if self.return_name:
+            return pd_img, wip_img, os.path.basename(wip_path)
+        else:
+            return pd_img, wip_img
 
     def __len__(self):
-        return len(self.images)
+        return len(self.pd_images)
+

@@ -13,6 +13,7 @@ def setup_distributed(backend="nccl", port=None):
     num_gpus = torch.cuda.device_count()
 
     if "SLURM_JOB_ID" in os.environ:
+        print("using slurm")
         rank = int(os.environ["SLURM_PROCID"])
         world_size = int(os.environ["SLURM_NTASKS"])
         node_list = os.environ["SLURM_NODELIST"]
@@ -28,6 +29,7 @@ def setup_distributed(backend="nccl", port=None):
         os.environ["LOCAL_RANK"] = str(rank % num_gpus)
         os.environ["RANK"] = str(rank)
     else:
+        print("using dist")
         rank = int(os.environ["RANK"])
         world_size = int(os.environ["WORLD_SIZE"])
 

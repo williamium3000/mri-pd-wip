@@ -17,7 +17,9 @@ from model.pix2pix import networks2d
 from util.utils import count_params, init_log
 from util.scheduler import *
 from util.dist_helper import setup_distributed
-# from eval3d import evaluate3d
+
+from eval2d import evaluate_2d
+from dataset.pd_wip_3d import PDWIP3DDataset
 
 parser = argparse.ArgumentParser(description='Medical image segmentation in 3D')
 parser.add_argument('--config', type=str, required=True)
@@ -26,19 +28,24 @@ parser.add_argument('--val-id-path', type=str, required=True)
 parser.add_argument('--save-path', type=str, required=True)
 parser.add_argument('--local-rank', default=0, type=int)
 parser.add_argument('--port', default=None, type=int)
+parser.add_argument('--save_feq', type=int, default=None)
 parser.add_argument('--clip-grad-norm', default=None, type=float)
-
+parser.add_argument('--save', action="store_true")
 
 def main():
     args = parser.parse_args()
 
     cfg = yaml.load(open(args.config, "r"), Loader=yaml.Loader)
 
+    if args.save:
+        args.out_dir = os.path.join(args.save_path, "results")
+        os.makedirs(args.out_dir, exist_ok=True)
+    
     logger = init_log('global', logging.INFO)
     logger.propagate = 0
 
     rank, word_size = setup_distributed(port=args.port)
-
+    args.rank = rank
     if rank == 0:
         logger.info('{}\n'.format(pprint.pformat(cfg)))
 
@@ -70,32 +77,38 @@ def main():
     trainset = PDWIP2DDataset(
         cfg=cfg,
         mode="train",
-        pd_root=cfg['pd_root'],
-        wip_root=cfg['wip_root'],
+        pd_root=cfg['train_pd_root'],
+        wip_root=cfg['train_wip_root'],
         list=args.train_id_path)
-    # valset = Medical3DDataset(
-    #     cfg=cfg,
-    #     mode="val",
-    #     img_root=cfg['img_root'],
-    #     label_root=cfg['mask_root'],
-    #     list=args.val_id_path)
+    valset = PDWIP3DDataset(
+        cfg=cfg,
+        mode="val",
+        pd_root=cfg['val_pd_root'],
+        wip_root=cfg['val_wip_root'],
+        list=args.val_id_path, return_name=True)
+    
     
     trainsampler = torch.utils.data.distributed.DistributedSampler(trainset)
     trainloader = DataLoader(trainset, batch_size=cfg['batch_size'],
                              pin_memory=True, num_workers=2, drop_last=True, sampler=trainsampler)
+    
     # valsampler = torch.utils.data.distributed.DistributedSampler(valset)
-    # valloader = DataLoader(valset, batch_size=1, pin_memory=True, num_workers=2,
-    #                        drop_last=False, sampler=valsampler)
+    valloader = DataLoader(valset, batch_size=1,
+                             pin_memory=True, num_workers=2, drop_last=False, shuffle=False)
     
     total_iters = len(trainloader) * cfg['epochs']
     if "scheduler" not in cfg:
-        scheduler = None
+        scheduler_D = None
+        scheduler_G = None
     elif cfg["scheduler"]["name"] == "PolynomialLR":
         scheduler_D = PolynomialLR(optimizer=optimizer_D, total_iters=total_iters, **cfg["scheduler"]["kwargs"])
         scheduler_G = PolynomialLR(optimizer=optimizer_G, total_iters=total_iters, **cfg["scheduler"]["kwargs"])
     elif cfg["scheduler"]["name"] == "WarmupCosineSchedule":
         scheduler_D = WarmupCosineSchedule(optimizer=optimizer_D, t_total=total_iters, **cfg["scheduler"]["kwargs"])
         scheduler_G = WarmupCosineSchedule(optimizer=optimizer_G, t_total=total_iters, **cfg["scheduler"]["kwargs"])
+    else:
+        scheduler_D = getattr(lr_scheduler, cfg["scheduler"]["name"])(optimizer=optimizer_D, **cfg["scheduler"]["kwargs"])
+        scheduler_G = getattr(lr_scheduler, cfg["scheduler"]["name"])(optimizer=optimizer_G, **cfg["scheduler"]["kwargs"])
 
     local_rank = int(os.environ["LOCAL_RANK"])
     model_G = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model_G)
@@ -113,8 +126,6 @@ def main():
     criterionL1 = torch.nn.L1Loss()
     
     
-    
-    
     for epoch in range(start_epoch, cfg['epochs']):
         if rank == 0:
             logger.info('===========> Epoch: {:}, LR: {:.4f}, Previous best: {:.2f}'.format(
@@ -123,6 +134,7 @@ def main():
         total_loss_G = 0.0
 
         trainsampler.set_epoch(epoch)
+        
         for i, (real_A, real_B) in enumerate(trainloader):
             model_D.train()
             model_G.train()
@@ -176,22 +188,38 @@ def main():
                 logger.info('Iters: {:}/ {:}, loss G: {:.3f}, loss D: {:.3f}'.format(i, len(trainloader), total_loss_G / (i+1), total_loss_D / (i+1)))
 
         if "scheduler" in cfg and cfg["lr_decay_per_epoch"]:
-                scheduler_D.step()
-                scheduler_G.step()
-        # mIOU, iou_class, fDice, dice_class, fHD95, hd95_class = \
-        #     evaluate3d(model, valloader, cfg, local_rank)
+            scheduler_D.step()
+            scheduler_G.step()
 
-        # if rank == 0:
-        #     logger.info(
-        #         '***** Evaluation {} ***** >>>> mIOU: {:.2f}, fDice: {:.2f} fHD95: {:.2f}\n'.format(
-        #             cfg["eval_mode"], mIOU, fDice, fHD95))
+        # # single node eval
+        # model_G.eval()
+        # # with torch.no_grad():
+        # psnr, ssim, mse, l1 = \
+        #     evaluate_2d(args, model_G, valloader, True)
+        
+        if rank == 0:
+            # single node eval
+            # model_G.eval()
+            # with torch.no_grad():
+            psnr, ssim, mse, l1 = \
+                evaluate_2d(args, model_G, valloader)
+                
+            # logger.info(
+            #     '***** Evaluation ***** >>>> AVG(PSNR + SSIM):{:.2f}, PSNR: {:.2f}, SSIM: {:.2f} MSE: {:.4f}, L1: {:.4f}\n'.format(sum([psnr, ssim]) / 2, psnr, ssim, mse, l1))
 
-        # if fDice > previous_best and rank == 0:
-        #     if previous_best != 0:
-        #         os.remove(os.path.join(args.save_path, '%s_%.2f.pth' % (cfg['backbone']["name"], previous_best)))
-        #     previous_best = fDice
-        #     torch.save(model.module.state_dict(),
-        #                os.path.join(args.save_path, '%s_%.2f.pth' % (cfg['backbone']["name"], fDice)))
+            if args.save_feq is not None and (epoch + 1) % args.save_feq == 0:
+                torch.save({
+                    "model_G": model_G.module.state_dict(),
+                    "model_D": model_D.module.state_dict()},
+                                os.path.join(args.save_path, f'epoch{epoch}.pth'))
+            # if sum([psnr, ssim]) / 2 > previous_best:
+            #     if os.path.exists(os.path.join(args.save_path, 'best_{:.2f}.pth'.format(previous_best))):
+            #         os.remove(os.path.join(args.save_path, 'best_{:.2f}.pth'.format(previous_best)))
+            #     previous_best = sum([psnr, ssim]) / 2
+            #     torch.save({
+            #         "model_G": model_G.module.state_dict(),
+            #         "model_D": model_D.module.state_dict()},
+            #                     os.path.join(args.save_path, 'best_{:.4f}.pth'.format(previous_best)))
     torch.save({
         "model_G": model_G.module.state_dict(),
         "model_D": model_D.module.state_dict()},

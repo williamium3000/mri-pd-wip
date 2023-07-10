@@ -1,10 +1,10 @@
 #!/bin/bash
 now=$(date +"%Y%m%d_%H%M%S")
 
-config=configs/pix2pix_2d/unet64_ngf64_basic-patchgan_ndf64_b256_lr1e-2.yaml
+config=configs/pix2pix_2d/unet64_ngf64_basic-patchgan_ndf64_cosinlr.yaml
 train_id_path=data/pd_wip/pd_wip_2d.txt
-val_id_path=data/pd_wip/pd_wip_2d.txt
-save_path=work_dirs/pix2pix_2d/unet64_ngf64_basic-patchgan_ndf64_b256_lr1e-2
+val_id_path=data/pd_wip/pd_wip_eval_3d.txt
+save_path=work_dirs/pix2pix_2d/unet64_ngf64_basic-patchgan_ndf64_cosinlr
 
 mkdir -p $save_path
 

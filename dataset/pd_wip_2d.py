@@ -46,8 +46,10 @@ class PDWIP2DDataset(Dataset):
         pd_img = np.load(pd_path) # (X, Y, C)
         wip_img = np.load(wip_path) # (X, Y, C)
 
-        pd_img = self.transform(pd_img).float()
-        wip_img = self.transform(wip_img).float()
+        # pd max:  1762.0
+        # wip max:  1848.0
+        pd_img = self.transform(pd_img).float() / 1762.0
+        wip_img = self.transform(wip_img).float() / 1848.0
         return pd_img, wip_img
 
     def __len__(self):
