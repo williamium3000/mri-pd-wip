@@ -7,31 +7,30 @@ val_wip_root: data/pd_wip/wip_registration_nifti/test
 # arguments for training
 optim: AdamW
 epochs: 50
-batch_size: 256
+batch_size: 128
 lr: 0.0005  # 1GPUs
-lr_multi: 0.0
 
-# scheduler: 
-#   name: CosineAnnealingLR
-#   kwargs:
-#     T_max: 5350
-#     eta_min: 0.0
+scheduler: 
+  name: CosineAnnealingLR
+  kwargs:
+    T_max: 5350
+    eta_min: 0.0
     
-# lr_decay_per_epoch: False
-# lr_decay_per_step: True
+lr_decay_per_epoch: false
+lr_decay_per_step: true
 
 lambda_L1: 1.0
 generator: {
   input_nc: 1,
   output_nc: 1,
-  ngf: 32, 
+  ngf: 64, 
   netG: "unet_64",
   norm: "instance"
 }
 
 discriminator: {
   input_nc: 2, # conditional 
-  ndf: 32, 
+  ndf: 64, 
   netD: "basic",
   norm: "instance"
 }

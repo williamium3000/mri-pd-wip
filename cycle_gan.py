@@ -87,15 +87,19 @@ def main():
     if rank == 0:
         logger.info('Total params: {:.1f}M\n'.format(count_params(model_G_AB) + count_params(model_G_BA) + count_params(model_D_AB) + count_params(model_D_BA)))
 
+    param_group_g = [{'params': model_G_AB.parameters(),'lr': cfg['lr']},
+                    {'params': model_G_BA.parameters(), 'lr': cfg['lr']}]
+    param_group_d = [{'params': model_D_AB.parameters(),'lr': cfg['lr']},
+                    {'params': model_D_BA.parameters(), 'lr': cfg['lr']}]
     if cfg["optim"] == "SGD":
-        optimizer_G = SGD(itertools.chain(model_G_AB.parameters(), model_G_BA.parameters()), lr=cfg['lr'], momentum=0.9, weight_decay=1e-4)
-        optimizer_D = SGD(itertools.chain(model_D_AB.parameters(), model_D_BA.parameters()), lr=cfg['lr'], momentum=0.9, weight_decay=1e-4)
+        optimizer_G = SGD(param_group_g, lr=cfg['lr'], momentum=0.9, weight_decay=1e-4)
+        optimizer_D = SGD(param_group_d, lr=cfg['lr'], momentum=0.9, weight_decay=1e-4)
     elif cfg["optim"] == "AdamW":
-        optimizer_G = AdamW(itertools.chain(model_G_AB.parameters(), model_G_BA.parameters()), lr=cfg['lr'], weight_decay=0.01, betas=(0.9, 0.999))
-        optimizer_D = AdamW(itertools.chain(model_D_AB.parameters(), model_D_BA.parameters()), lr=cfg['lr'], weight_decay=0.01, betas=(0.9, 0.999))
+        optimizer_G = AdamW(param_group_g, lr=cfg['lr'], weight_decay=0.01, betas=(0.9, 0.999))
+        optimizer_D = AdamW(param_group_d, lr=cfg['lr'], weight_decay=0.01, betas=(0.9, 0.999))
     elif cfg["optim"] == "Adam":
-        optimizer_G = Adam(itertools.chain(model_G_AB.parameters(), model_G_BA.parameters()), lr=cfg['lr'], weight_decay=1e-4)
-        optimizer_D = Adam(itertools.chain(model_D_AB.parameters(), model_D_BA.parameters()), lr=cfg['lr'], weight_decay=1e-4)
+        optimizer_G = Adam(param_group_g, lr=cfg['lr'], weight_decay=1e-4)
+        optimizer_D = Adam(param_group_d, lr=cfg['lr'], weight_decay=1e-4)
     else:
         raise NotImplementedError(f'{cfg["optim"]} not implemented')
     trainset = PDWIP2DDataset(
@@ -122,15 +126,25 @@ def main():
                              pin_memory=True, num_workers=2, drop_last=False, sampler=valsampler)
     total_iters = len(trainloader) * cfg['epochs']
     if "scheduler" not in cfg:
+        logger.info("no scheduler used")
         scheduler_D = None
         scheduler_G = None
     elif cfg["scheduler"]["name"] == "PolynomialLR":
+        logger.info("using PolynomialLR scheduler")
         scheduler_D = PolynomialLR(optimizer=optimizer_D, total_iters=total_iters, **cfg["scheduler"]["kwargs"])
         scheduler_G = PolynomialLR(optimizer=optimizer_G, total_iters=total_iters, **cfg["scheduler"]["kwargs"])
     elif cfg["scheduler"]["name"] == "WarmupCosineSchedule":
+        logger.info("using WarmupCosineSchedule scheduler")
         scheduler_D = WarmupCosineSchedule(optimizer=optimizer_D, t_total=total_iters, **cfg["scheduler"]["kwargs"])
         scheduler_G = WarmupCosineSchedule(optimizer=optimizer_G, t_total=total_iters, **cfg["scheduler"]["kwargs"])
+    elif cfg["scheduler"]["name"] == "CosineAnnealingLR":
+        logger.info("using CosineAnnealingLR scheduler")
+        cfg["scheduler"]["kwargs"]["T_max"] = total_iters
+        scheduler_D = lr_scheduler.CosineAnnealingLR(optimizer=optimizer_D, **cfg["scheduler"]["kwargs"])
+        scheduler_G = lr_scheduler.CosineAnnealingLR(optimizer=optimizer_G, **cfg["scheduler"]["kwargs"])
     else:
+        logger.info(f"using {cfg['scheduler']['name']} scheduler")
+        logger.info(cfg["scheduler"])
         scheduler_D = getattr(lr_scheduler, cfg["scheduler"]["name"])(optimizer=optimizer_D, **cfg["scheduler"]["kwargs"])
         scheduler_G = getattr(lr_scheduler, cfg["scheduler"]["name"])(optimizer=optimizer_G, **cfg["scheduler"]["kwargs"])
         
@@ -167,7 +181,7 @@ def main():
     
     for epoch in range(start_epoch, cfg['epochs']):
         if rank == 0:
-            logger.info('===========> Epoch: {:}, LR: {:.4f}, Previous best: {:.2f}'.format(
+            logger.info('===========> Epoch: {:}, LR: {:.6f}, Previous best: {:.2f}'.format(
                 epoch, optimizer_G.param_groups[0]['lr'], previous_best))
 
         total_loss_D = 0.0

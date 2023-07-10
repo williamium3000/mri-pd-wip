@@ -36,43 +36,47 @@ parser.add_argument('--g-key', type=str, default="model_G", required=True)
 parser.add_argument('--save', action="store_true")
 
 
-def evaluate_2d(args, model_G, dataloader):
-    psnr = PeakSignalNoiseRatio().cuda()
-    ssim = StructuralSimilarityIndexMeasure(data_range=1.0).cuda()
-    mean_squared_error = MeanSquaredError().cuda()
+def evaluate_2d(args, model_G, dataloader, dist_eval):
+    psnr = PeakSignalNoiseRatio().to(model_G.device)
+    ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(model_G.device)
+    mean_squared_error = MeanSquaredError().to(model_G.device)
     total_l1 = 0.0
+    total_psnr = 0.0
+    total_ssim = 0.0
+    total_mse = 0.0
     total_num = 0
     
     for i, (real_A, real_B, real_B_name) in enumerate(tqdm.tqdm(dataloader)):
+
         real_A, real_B = real_A.cuda(), real_B.cuda() # 1, 1, 320, 320, 128
         real_A = real_A.squeeze(0).permute(3, 0, 1, 2) # 128, 1, 320, 320
-        with torch.no_grad():
-            fake_B = model_G(real_A) # 128, 1, 320, 320
+
+        fake_B = model_G(real_A) # 128, 1, 320, 320
         
         output = fake_B.permute(1, 2, 3, 0) # 1, 320, 320, 128
         output = output.unsqueeze(0) # 1, 1, 320, 320, 128
-        psnr.update(real_B, output)
-        ssim.update(real_B, output)
-        mean_squared_error.update(real_B, output)
+        total_psnr += psnr(real_B, output)
+        total_ssim += ssim(real_B, output)
+        total_mse += mean_squared_error(real_B, output)
         total_l1 += (torch.abs(real_B - output)).mean()
         total_num += 1
         
-        # if args.save:
-        #     fake_B = fake_B.permute(1, 2, 3, 0).squeeze(0).permute(0, 2, 1).detach().cpu().numpy() * 1848.0 # scale back
-        #     if(np.iscomplex(fake_B).any()):
-        #         fake_B = abs(fake_B)
-        #     nii = nib.Nifti1Image(fake_B, np.eye(4)) 
-        #     nib.save(nii, os.path.join(args.out_dir, real_B_name[0]))
-    # psnr, ssim, mse, l1 = psnr.compute(), ssim.compute(), mean_squared_error.compute(), total_l1 / total_num
+        if args.save:
+            fake_B = fake_B.permute(1, 2, 3, 0).detach().cpu().squeeze(0).permute(0, 2, 1).numpy() * 1848.0 # scale back
+            if(np.iscomplex(fake_B).any()):
+                fake_B = abs(fake_B)
+            nii = nib.Nifti1Image(fake_B, np.eye(4)) 
+            nib.save(nii, os.path.join(args.out_dir, real_B_name[0]))
+        break
+    psnr, ssim, mse, l1 = total_psnr / total_num, total_ssim / total_num, total_mse / total_num, total_l1 / total_num
     
-    # if dist_eval:
-    #     dist.all_reduce(psnr)
-    #     dist.all_reduce(ssim)
-    #     dist.all_reduce(mse)
-    #     dist.all_reduce(l1)
-    #     dist.barrier()
-        
-    return psnr.compute(), ssim.compute(), mean_squared_error.compute(), total_l1 / total_num
+    if dist_eval:
+        dist.all_reduce(psnr)
+        dist.all_reduce(ssim)
+        dist.all_reduce(mse)
+        dist.all_reduce(l1)
+        dist.barrier()
+    return psnr, ssim, mse, l1
 
 def main():
     args = parser.parse_args()

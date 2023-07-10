@@ -9,8 +9,7 @@ val_wip_root: data/pd_wip/wip_registration_nifti/test
 optim: AdamW
 epochs: 50
 batch_size: 128
-lr: 0.0005  # 1GPUs
-
+lr: 0.0002  # 1GPUs
 
 scheduler: 
   name: CosineAnnealingLR
@@ -18,8 +17,8 @@ scheduler:
     T_max: 5350
     eta_min: 0.0
     
-lr_decay_per_epoch: False
-lr_decay_per_step: True
+lr_decay_per_epoch: false
+lr_decay_per_step: true
 
 lambda_A: 10.0
 lambda_B: 10.0
@@ -32,6 +31,9 @@ generator: {
   netG: "unet_64",
   norm: "instance"
 }
+
+
+
 
 discriminator: {
   input_nc: 1, # unpaired
