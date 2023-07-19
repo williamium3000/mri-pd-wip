@@ -4,7 +4,7 @@ now=$(date +"%Y%m%d_%H%M%S")
 config=configs/cyclegan/unet64_ngf64_basic-patchgan_ndf64_cosinlr.yaml
 train_id_path=data/pd_wip/pd_wip_2d.txt
 val_id_path=data/pd_wip/pd_wip_eval_3d.txt
-save_path=work_dirs/cycle_gan_2d/unet64_ngf64_basic-patchgan_ndf64_cosinlr
+save_path=work_dirs/cycle_gan_2d/unet64_ngf64_basic-patchgan_ndf64_cosinlr_bs64
 
 mkdir -p $save_path
 
