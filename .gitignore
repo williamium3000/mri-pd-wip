@@ -4,3 +4,4 @@ exp
 *.pyc
 .hfai
 work_dirs
+.DS_Store
