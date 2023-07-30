@@ -1,0 +1,36 @@
+# arguments for dataset
+train_pd_root: data/pd_wip/pd_nifti_final/train2d
+train_wip_root: data/pd_wip/wip_registration_nifti/train2d
+val_pd_root: data/pd_wip/pd_nifti_final/test
+val_wip_root: data/pd_wip/wip_registration_nifti/test
+
+# arguments for training
+optim: Adam
+epochs: 20
+batch_size: 64
+lr: 0.0002  # 1GPUs
+
+scheduler: 
+  name: CosineAnnealingLR
+  kwargs:
+    T_max: 8580
+    eta_min: 0.0
+    
+lr_decay_per_epoch: false
+lr_decay_per_step: true
+
+lambda_L1: 10.0
+generator: {
+  input_nc: 1,
+  output_nc: 1,
+  ngf: 32, 
+  netG: "unet_64",
+  norm: "instance"
+}
+
+discriminator: {
+  input_nc: 2, # conditional 
+  ndf: 32, 
+  netD: "basic",
+  norm: "instance"
+}

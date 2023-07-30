@@ -37,9 +37,9 @@ parser.add_argument('--save', action="store_true")
 
 
 def evaluate_2d(args, model_G, dataloader, dist_eval):
-    psnr = PeakSignalNoiseRatio().to(model_G.device)
-    ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(model_G.device)
-    mean_squared_error = MeanSquaredError().to(model_G.device)
+    psnr = PeakSignalNoiseRatio().cuda()
+    ssim = StructuralSimilarityIndexMeasure(data_range=1.0).cuda()
+    mean_squared_error = MeanSquaredError().cuda()
     total_l1 = 0.0
     total_psnr = 0.0
     total_ssim = 0.0
@@ -67,7 +67,6 @@ def evaluate_2d(args, model_G, dataloader, dist_eval):
                 fake_B = abs(fake_B)
             nii = nib.Nifti1Image(fake_B, np.eye(4)) 
             nib.save(nii, os.path.join(args.out_dir, real_B_name[0]))
-        break
     psnr, ssim, mse, l1 = total_psnr / total_num, total_ssim / total_num, total_mse / total_num, total_l1 / total_num
     
     if dist_eval:
@@ -114,7 +113,7 @@ def main():
     os.makedirs(args.out_dir, exist_ok=True)
     
     with torch.no_grad():
-        psnr, ssim, mse, l1 = evaluate_2d(args, model_G, valloader)
+        psnr, ssim, mse, l1 = evaluate_2d(args, model_G, valloader, False)
     print('***** Evaluation ***** >>>> PSNR: {:.4f}, SSIM: {:.4f} MSE: {:.4f}, L1: {:.4f}\n'.format(psnr, ssim, mse, l1))
     
         
