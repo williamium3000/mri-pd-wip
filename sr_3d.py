@@ -9,42 +9,45 @@ from torch import nn
 import torch.backends.cudnn as cudnn
 from torch.optim import SGD, AdamW, Adam
 from torch.optim import lr_scheduler
-# from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader
 import yaml
 
-from dataset.medical3d import Medical3DDataset
-from model.semseg.segmentor import Segmentor
-from util.loss import ProbOhemCrossEntropy2d, CrossEntropyAndDice
-from segmentation_models_pytorch.losses import DiceLoss
+from model.backbone.unet3d import UNet3D
 from util.utils import count_params, init_log
 from util.scheduler import *
 from util.dist_helper import setup_distributed
-from eval3d import evaluate3d
 
-import hfai
-from ffrecord.torch import DataLoader
+from eval3d import evaluate_3d
+from dataset.pd_wip_3d import PDWIP3DDataset
+from torch.cuda.amp import autocast, GradScaler
+from torchmetrics.image import StructuralSimilarityIndexMeasure
 
 parser = argparse.ArgumentParser(description='Medical image segmentation in 3D')
 parser.add_argument('--config', type=str, required=True)
 parser.add_argument('--train-id-path', type=str, required=True)
 parser.add_argument('--val-id-path', type=str, required=True)
 parser.add_argument('--save-path', type=str, required=True)
-parser.add_argument('--local_rank', default=0, type=int)
+parser.add_argument('--local-rank', default=0, type=int)
 parser.add_argument('--port', default=None, type=int)
+parser.add_argument('--save_feq', type=int, default=None)
 parser.add_argument('--clip-grad-norm', default=None, type=float)
+parser.add_argument('--save', action="store_true")
 parser.add_argument('--amp', action="store_true")
-
 
 def main():
     args = parser.parse_args()
 
     cfg = yaml.load(open(args.config, "r"), Loader=yaml.Loader)
 
+    if args.save:
+        args.out_dir = os.path.join(args.save_path, "results")
+        os.makedirs(args.out_dir, exist_ok=True)
+    
     logger = init_log('global', logging.INFO)
     logger.propagate = 0
 
     rank, word_size = setup_distributed(port=args.port)
-
+    args.rank = rank
     if rank == 0:
         logger.info('{}\n'.format(pprint.pformat(cfg)))
 
@@ -54,143 +57,170 @@ def main():
     cudnn.enabled = True
     cudnn.benchmark = True
 
-    model = Segmentor(cfg)
+    
+    model = UNet3D(**cfg["model"])
+    
     if rank == 0:
         logger.info('Total params: {:.1f}M\n'.format(count_params(model)))
 
-    param_group = [{'params': model.backbone.parameters(), 'lr': cfg['lr']},
-                     {'params': model.head.parameters(),
-                      'lr': cfg['lr'] * cfg['lr_multi']}]
     if cfg["optim"] == "SGD":
-        optimizer = SGD(param_group, lr=cfg['lr'], momentum=0.9, weight_decay=1e-4)
+        optimizer = SGD(model.parameters(), lr=cfg['lr'], momentum=0.9, weight_decay=1e-4)
     elif cfg["optim"] == "AdamW":
-        optimizer = AdamW(param_group, lr=cfg['lr'], weight_decay=0.01, betas=(0.9, 0.999))
+        optimizer = AdamW(model.parameters(), lr=cfg['lr'], weight_decay=0.01, betas=(0.9, 0.999))
     elif cfg["optim"] == "Adam":
-        optimizer = Adam(param_group, lr=cfg['lr'], weight_decay=1e-4)
+        optimizer = Adam(model.parameters(), lr=cfg['lr'], weight_decay=1e-4, betas=(0.5, 0.999))
     else:
         raise NotImplementedError(f'{cfg["optim"]} not implemented')
     
+    trainset = PDWIP3DDataset(
+        cfg=cfg,
+        mode="train",
+        pd_root=cfg['train_pd_root'],
+        wip_root=cfg['train_wip_root'],
+        list=args.train_id_path)
+    
+    valset = PDWIP3DDataset(
+        cfg=cfg,
+        mode="val",
+        pd_root=cfg['val_pd_root'],
+        wip_root=cfg['val_wip_root'],
+        list=args.val_id_path, return_name=True)
+    
+    
+    trainsampler = torch.utils.data.distributed.DistributedSampler(trainset)
+    trainloader = DataLoader(trainset, batch_size=cfg['batch_size'],
+                             pin_memory=True, num_workers=2, drop_last=True, sampler=trainsampler)
+    
+    valsampler = torch.utils.data.distributed.DistributedSampler(valset)
+    valloader = DataLoader(valset, batch_size=1,
+                             pin_memory=True, num_workers=2, drop_last=False, sampler=valsampler)
+    
     total_iters = len(trainloader) * cfg['epochs']
     if "scheduler" not in cfg:
+        logger.info("no scheduler used")
         scheduler = None
     elif cfg["scheduler"]["name"] == "PolynomialLR":
+        logger.info("using PolynomialLR scheduler")
         scheduler = PolynomialLR(optimizer=optimizer, total_iters=total_iters, **cfg["scheduler"]["kwargs"])
     elif cfg["scheduler"]["name"] == "WarmupCosineSchedule":
+        logger.info("using WarmupCosineSchedule scheduler")
         scheduler = WarmupCosineSchedule(optimizer=optimizer, t_total=total_iters, **cfg["scheduler"]["kwargs"])
-    
-    try: # old torch does not have the amp
-        scaler = torch.cuda.amp.GradScaler() if args.amp else None
-    except:
-        scaler = None
-        args.amp = False
-        warnings.warn("current torch does not support fp16!")
-    
+    elif cfg["scheduler"]["name"] == "CosineAnnealingLR":
+        logger.info("using CosineAnnealingLR scheduler")
+        cfg["scheduler"]["kwargs"]["T_max"] = total_iters
+        scheduler = lr_scheduler.CosineAnnealingLR(optimizer=optimizer, **cfg["scheduler"]["kwargs"])
+    else:
+        logger.info(f"using {cfg['scheduler']['name']} scheduler")
+        logger.info(cfg["scheduler"])
+        scheduler = getattr(lr_scheduler, cfg["scheduler"]["name"])(optimizer=optimizer, **cfg["scheduler"]["kwargs"])
+
+
     local_rank = int(os.environ["LOCAL_RANK"])
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model.cuda(local_rank)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank],
                                                       output_device=local_rank, find_unused_parameters=False)
-    start_epoch = 0
-    start_step = 0
-    start_epoch, start_step, previous_best = hfai.checkpoint.init(model, optimizer, scheduler=scheduler, amp_scaler=scaler,
-                                                             ckpt_path=os.path.join(args.save_path, 'last.pth'))
-    previous_best = previous_best if previous_best else 0.0
-    
-    if cfg['criterion']['name'] == 'CELoss':
-        criterion = nn.CrossEntropyLoss(**cfg['criterion']['kwargs']).cuda(local_rank)
-    elif cfg['criterion']['name'] == 'OHEM':
-        criterion = ProbOhemCrossEntropy2d(**cfg['criterion']['kwargs']).cuda(local_rank)
-    elif cfg['criterion']['name'] == 'Dice':
-        criterion = DiceLoss(**cfg['criterion']['kwargs']).cuda(local_rank)
-    elif cfg['criterion']['name'] == 'CrossEntropyAndDice':
-        criterion = CrossEntropyAndDice(**cfg['criterion']['kwargs']).cuda(local_rank)
-    else:
-        raise NotImplementedError('%s criterion is not implemented' % cfg['criterion']['name'])
 
-    trainset = Medical3DDataset(
-        cfg=cfg,
-        mode="train",
-        img_root=cfg['img_root'],
-        label_root=cfg['mask_root'],
-        list=args.train_id_path)
-    valset = Medical3DDataset(
-        cfg=cfg,
-        mode="val",
-        img_root=cfg['img_root'],
-        label_root=cfg['mask_root'],
-        list=args.val_id_path)
+    start_epoch = 0
+    previous_best = 0.0
     
-    trainsampler = torch.utils.data.distributed.DistributedSampler(trainset)
-    trainloader = DataLoader(trainset, batch_size=cfg['batch_size'],
-                             pin_memory=True, num_workers=2, drop_last=True, sampler=trainsampler)
-    valsampler = torch.utils.data.distributed.DistributedSampler(valset)
-    valloader = DataLoader(valset, batch_size=1, pin_memory=True, num_workers=2,
-                           drop_last=False, sampler=valsampler)
+    criterionL1 = torch.nn.L1Loss()
+    criterionL2 = torch.nn.MSELoss()
+    criterionSSIM = StructuralSimilarityIndexMeasure(data_range=1.0).cuda()
     
     
-    
-    
+    if args.amp:
+        scalar = GradScaler()
+    else:
+        scalar = None
+        
     for epoch in range(start_epoch, cfg['epochs']):
         if rank == 0:
-            logger.info('===========> Epoch: {:}, LR: {:.4f}, Previous best: {:.2f}'.format(
+            logger.info('===========> Epoch: {:}, LR: {:.6f}, Previous best: {:.2f}'.format(
                 epoch, optimizer.param_groups[0]['lr'], previous_best))
-
-        model.train()
         total_loss = 0.0
+        total_l1 = 0.0
+        total_l2 = 0.0
+        total_ssim = 0.0
 
         trainsampler.set_epoch(epoch)
-        trainloader.set_step(start_step)
         
-        for i, (img, mask) in enumerate(trainloader):
-            i += start_step
-            img, mask = img.cuda(), mask.cuda()
-            with torch.cuda.amp.autocast(enabled=args.amp):
-                pred = model(img)
-                loss = criterion(pred, mask)
-            
-            torch.distributed.barrier()
+        for i, (real_A, real_B) in enumerate(trainloader):
+            model.train()
             optimizer.zero_grad()
-            if args.amp:
-                scaler.scale(loss).backward()
+            
+            with autocast(enabled=scalar is not None):
+                real_A, real_B = real_A.cuda(), real_B.cuda()
+                pred_B = model(real_A)
+                l1_loss = criterionL1(pred_B, real_B) 
+                l2_loss = criterionL2(pred_B, real_B)
+                sim_loss = criterionSSIM(pred_B, real_B)
+                loss = l1_loss + l2_loss + 10 * sim_loss
+            
+            total_loss += loss.clone().detach().item()
+            total_l1 += l1_loss.clone().detach().item()
+            total_l2 += l2_loss.clone().detach().item()
+            total_ssim += sim_loss.clone().detach().item()
+            #############################################
+            #                   update D
+            #############################################
+            if scalar is not None:
+                loss = scalar.scale(loss)
+                loss.backward()
+                
                 if args.clip_grad_norm is not None:
-                    # we should unscale the gradients of optimizer's assigned params if do gradient clipping
-                    scaler.unscale_(optimizer)
-                    nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
-                scaler.step(optimizer)
-                scaler.update()
+                    scalar.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
+            
+                scalar.step(optimizer)
+                scalar.update()
+
             else:
                 loss.backward()
                 if args.clip_grad_norm is not None:
-                    nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
+                
                 optimizer.step()
             
-            
-            total_loss += loss.item()
-            if cfg["lr_decay_per_step"]:
+
+            if "scheduler" in cfg and cfg["lr_decay_per_step"]:
                 scheduler.step()
 
-            if ((i % 10) == 0) and (rank == 0):
-                logger.info('Iters: {:}/ {:}, Total loss: {:.3f}'.format(i, len(trainloader), total_loss / (i+1)))
+            if ((i % 20) == 0) and (rank == 0):
+                logger.info('Iters: {:}/ {:}, lr: {:.6f}, total loss: {:.3f}, l1 loss: {:.3f}, l2 loss: {:.3f}, ssim loss: {:.3f}'.format(
+                    i, len(trainloader), optimizer.param_groups[0]['lr'], total_loss / (i+1), 
+                    total_l1 / (i+1), 
+                    total_l2 / (i+1), 
+                    total_ssim / (i+1), 
+                    ))
 
-            model.try_save(epoch, i + 1, others=previous_best)
-        # reset start step
-        start_step = 0  
-        if cfg["lr_decay_per_epoch"]:
-                scheduler.step()
-        mIOU, iou_class, fDice, dice_class, fHD95, hd95_class = \
-            evaluate3d(model, valloader, cfg, local_rank)
+        if "scheduler" in cfg and cfg["lr_decay_per_epoch"]:
+            scheduler.step()
 
+
+        model.eval()
+        with torch.no_grad():
+            psnr, ssim, mse, l1 = \
+                evaluate_3d(args, model, valloader, True)
+        
         if rank == 0:
             logger.info(
-                '***** Evaluation {} ***** >>>> mIOU: {:.2f}, fDice: {:.2f} fHD95: {:.2f}\n'.format(
-                    cfg["eval_mode"], mIOU, fDice, fHD95))
+                '***** Evaluation ***** >>>> AVG(PSNR + SSIM):{:.2f}, PSNR: {:.2f}, SSIM: {:.2f} MSE: {:.4f}, L1: {:.4f}\n'.format(sum([psnr, ssim]) / 2, psnr, ssim, mse, l1))
 
-        if fDice > previous_best and rank == 0:
-            if previous_best != 0:
-                os.remove(os.path.join(args.save_path, '%s_%.2f.pth' % (cfg['backbone']["name"], previous_best)))
-            previous_best = fDice
-            torch.save(model.module.state_dict(),
-                       os.path.join(args.save_path, '%s_%.2f.pth' % (cfg['backbone']["name"], fDice)))
+            if args.save_feq is not None and (epoch + 1) % args.save_feq == 0:
+                torch.save({
+                    "model": model.module.state_dict()},
+                                os.path.join(args.save_path, f'epoch{epoch}.pth'))
+            if sum([psnr, ssim]) / 2 > previous_best:
+                if os.path.exists(os.path.join(args.save_path, 'best_{:.2f}.pth'.format(previous_best))):
+                    os.remove(os.path.join(args.save_path, 'best_{:.2f}.pth'.format(previous_best)))
+                previous_best = sum([psnr, ssim]) / 2
+                torch.save({
+                    "model": model.module.state_dict()},
+                                os.path.join(args.save_path, 'best_{:.4f}.pth'.format(previous_best)))
+    torch.save({
+        "model": model.module.state_dict()},
+                    os.path.join(args.save_path, 'last.pth'))
 
 
 if __name__ == '__main__':

@@ -8,8 +8,10 @@ class UNet3D(nn.Module):
     def __init__(self,
                  in_channels,
                  base_channels=64,
-                 bilinear=True):
+                 bilinear=True,
+                 add_residual=True):
         super(UNet3D, self).__init__()
+        self.add_residual = add_residual
         self.two_convs = twoConvs3D(in_channels, base_channels, base_channels)
         self.down1 = downSample(base_channels, base_channels * 2)
         self.down2 = downSample(base_channels * 2, base_channels * 4)
@@ -19,7 +21,7 @@ class UNet3D(nn.Module):
         self.up1 = upSample(base_channels * 16, (base_channels * 8 )// factor, bilinear)
         self.up2 = upSample(base_channels * 8, (base_channels * 4) // factor, bilinear)
         self.up3 = upSample(base_channels * 4, (base_channels * 2) // factor, bilinear)
-        self.up4 = upSample(base_channels * 2, base_channels, bilinear)
+        self.up4 = upSample(base_channels * 2, in_channels, bilinear)
         
     def forward(self, x):
         self._check_input_divisible(x)
@@ -32,7 +34,11 @@ class UNet3D(nn.Module):
         out2 = self.up2(out1, x3)
         out3 = self.up3(out2, x2)
         out4 = self.up4(out3, x1)
-        return [x5, out1, out2, out3, out4]
+        
+        if self.add_residual:
+            return out4 + x
+        else:
+            return out4
     def _check_input_divisible(self, x):
         h, w, z = x.shape[-3:]
         whole_downsample_rate = 1

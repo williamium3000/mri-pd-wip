@@ -41,13 +41,13 @@ class PDWIP3DDataset(Dataset):
                     RandomRotation3d(prob=1.0),
                     Identity()
                 ]),
-                StdNormalize(),
+                # StdNormalize(),
                 ToTensor3d(),
             ])
         elif mode == "val":
             self.transform = transforms.Compose([
                 NoneZeroRegion3D(),
-                StdNormalize(),
+                # StdNormalize(),
                 Pad3D(size_divisor=16),
                 ToTensor3d(),
             ])
@@ -64,6 +64,7 @@ class PDWIP3DDataset(Dataset):
         # wip_img = self.transform(wip_img).float()
         # pd max:  1762.0
         # wip max:  1848.0
+        
         pd_img = torch.tensor(pd_img).permute(3, 0, 1, 2).float() / 1762.0
         wip_img = torch.tensor(wip_img).permute(3, 0, 1, 2).float() / 1848.0
         if self.return_name:
