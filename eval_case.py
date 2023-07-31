@@ -34,9 +34,9 @@ parser.add_argument('--val-id-path', type=str, required=True)
 
 
 def evaluate_2d(args, dataloader):
-    psnr = PeakSignalNoiseRatio()
-    ssim = StructuralSimilarityIndexMeasure(data_range=1.0)
-    mean_squared_error = MeanSquaredError()
+    psnr = PeakSignalNoiseRatio().cuda()
+    ssim = StructuralSimilarityIndexMeasure(data_range=1.0).cuda()
+    mean_squared_error = MeanSquaredError().cuda()
     total_l1 = 0.0
     total_psnr = 0.0
     total_ssim = 0.0
@@ -45,15 +45,18 @@ def evaluate_2d(args, dataloader):
     eval_files = list(os.listdir(args.case_dir))
     
     for i, (real_A, real_B, real_B_name) in enumerate(tqdm.tqdm(dataloader)):
-
+        real_B = real_B.cuda()
         case_name = real_B_name[0]
         case_id = case_name.split("-")[0]
+        found = False
         for eval_file in eval_files:
             if case_id in eval_file:
+                found = True
                 break
-        output = nib.load(os.path.join(args.case_dir, eval_file)).get_fdata().transpose(0,2,1)[:, :, :, np.newaxis] # (X, Y, Z, C)
-        output = torch.tensor(output).permute(3, 0, 1, 2).float()
-        output = output.unsqueeze(0)
+        assert found, f"{case_id} not matched"
+        output = nib.load(os.path.join(args.case_dir, eval_file)).get_fdata().transpose(0, 2, 1)[:, :, :, np.newaxis] # (X, Y, Z, C)
+        output = torch.tensor(output).permute(3, 0, 1, 2).float() / 1848.0
+        output = output.unsqueeze(0).cuda()
         total_psnr += psnr(real_B, output)
         total_ssim += ssim(real_B, output)
         total_mse += mean_squared_error(real_B, output)
