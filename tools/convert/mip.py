@@ -23,9 +23,9 @@ def create_mip(np_img, slices_num):
     #np_img = np_img.transpose(1, 0, 2)
     img_shape = np_img.shape
     np_mip = np.zeros(img_shape)
-    for i in range(img_shape[0]):
+    for i in range(img_shape[1]):
         start = max(0, i - slices_num)
-        np_mip[i, :, :] = np.amin(np_img[start:i + 1], 0)
+        np_mip[:, i, :] = np.amin(np_img[:, start:i + 1, :], 1)
     return np_mip#.transpose(1, 0, 2)
 
 
