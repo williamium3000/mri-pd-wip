@@ -27,13 +27,16 @@ from torchmetrics.regression import MeanSquaredError
 
 parser = argparse.ArgumentParser(description='Medical image segmentation in 3D')
 parser.add_argument('--config', type=str, required=True)
-parser.add_argument('--case_dir', type=str, required=True)
+parser.add_argument('--checkpoint', type=str, required=True)
 parser.add_argument('--pd_root', type=str, required=True)
 parser.add_argument('--wip_root', type=str, required=True)
 parser.add_argument('--val-id-path', type=str, required=True)
+parser.add_argument('--save-path', type=str, required=True)
+parser.add_argument('--g-key', type=str, default="model_G", required=True)
+parser.add_argument('--save', action="store_true")
 
 
-def evaluate_2d(args, dataloader):
+def evaluate_3d(args, model_G, dataloader, dist_eval):
     psnr = PeakSignalNoiseRatio().cuda()
     ssim = StructuralSimilarityIndexMeasure(data_range=1.0).cuda()
     mean_squared_error = MeanSquaredError().cuda()
@@ -42,29 +45,32 @@ def evaluate_2d(args, dataloader):
     total_ssim = 0.0
     total_mse = 0.0
     total_num = 0
-    eval_files = list(os.listdir(args.case_dir))
     
     for i, (real_A, real_B, real_B_name) in enumerate(tqdm.tqdm(dataloader)):
-        real_B = real_B.cuda()
-        case_name = real_B_name[0]
-        case_id = case_name.split("-")[0]
-        found = False
-        for eval_file in eval_files:
-            if case_id in eval_file:
-                found = True
-                break
-        assert found, f"{case_id} not matched"
-        output = nib.load(os.path.join(args.case_dir, eval_file)).get_fdata().transpose(0, 2, 1)[:, :, :, np.newaxis] # (X, Y, Z, C)
-        output = torch.tensor(output).permute(3, 0, 1, 2).float() / 1848.0
-        output = output.unsqueeze(0).cuda()
+
+        real_A, real_B = real_A.cuda(), real_B.cuda() # 1, 1, 320, 320, 128
+
+        output = model_G(real_A)
         total_psnr += psnr(real_B, output)
         total_ssim += ssim(real_B, output)
         total_mse += mean_squared_error(real_B, output)
         total_l1 += (torch.abs(real_B - output)).mean()
         total_num += 1
         
+        if args.save:
+            fake_B = fake_B.permute(1, 2, 3, 0).detach().cpu().squeeze(0).permute(0, 2, 1).numpy() * 1848.0 # scale back
+            if(np.iscomplex(fake_B).any()):
+                fake_B = abs(fake_B)
+            nii = nib.Nifti1Image(fake_B, np.eye(4)) 
+            nib.save(nii, os.path.join(args.out_dir, real_B_name[0]))
     psnr, ssim, mse, l1 = total_psnr / total_num, total_ssim / total_num, total_mse / total_num, total_l1 / total_num
-
+    
+    if dist_eval:
+        dist.all_reduce(psnr)
+        dist.all_reduce(ssim)
+        dist.all_reduce(mse)
+        dist.all_reduce(l1)
+        dist.barrier()
     return psnr, ssim, mse, l1
 
 def main():
@@ -82,6 +88,8 @@ def main():
     cudnn.benchmark = True
 
     
+    model_G = networks2d.define_G(**cfg["generator"])
+
     valset = PDWIP3DDataset(
         cfg=cfg,
         mode="val",
@@ -91,7 +99,17 @@ def main():
     
     valloader = DataLoader(valset, batch_size=1,
                              pin_memory=True, num_workers=2, drop_last=True, shuffle=False)
-    psnr, ssim, mse, l1 = evaluate_2d(args, valloader)
+    
+    model_G.load_state_dict(torch.load(args.checkpoint, map_location="cpu")[args.g_key])
+    
+    model_G.cuda()
+    model_G.eval()
+    
+    args.out_dir = os.path.join(args.save_path, "results")
+    os.makedirs(args.out_dir, exist_ok=True)
+    
+    with torch.no_grad():
+        psnr, ssim, mse, l1 = evaluate_3d(args, model_G, valloader, False)
     print('***** Evaluation ***** >>>> PSNR: {:.4f}, SSIM: {:.4f} MSE: {:.4f}, L1: {:.4f}\n'.format(psnr, ssim, mse, l1))
     
         
