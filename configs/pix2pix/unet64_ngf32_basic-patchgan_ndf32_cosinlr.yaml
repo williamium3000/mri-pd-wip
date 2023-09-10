@@ -1,39 +1,38 @@
 # arguments for dataset
-nclass: 4
-crop_size: 128
 train_pd_root: data/pd_wip/pd_nifti_final/train2d
 train_wip_root: data/pd_wip/wip_registration_nifti/train2d
 val_pd_root: data/pd_wip/pd_nifti_final/test
 val_wip_root: data/pd_wip/wip_registration_nifti/test
 
 # arguments for training
-optim: AdamW
-epochs: 50
-batch_size: 128
-lr: 0.0005  # 1GPUs
+optim: Adam
+epochs: 20
+batch_size: 64
+lr: 0.0002  # 1GPUs
 
-# scheduler: 
-#   name: PolynomialLR
-#   kwargs:
-#     power: 0.9
-# lr_decay_per_epoch: False
-# lr_decay_per_step: True
+scheduler: 
+  name: CosineAnnealingLR
+  kwargs:
+    T_max: 8580
+    eta_min: 0.0
+    
+lr_decay_per_epoch: false
+lr_decay_per_step: true
 
-lambda_A: 10.0
-lambda_B: 10.0
-lambda_identity: 0.1
+lambda_L1: 10.0
+
 model: {
   name: "pix2pix",
   generator: {
     input_nc: 1,
     output_nc: 1,
-    ngf: 64, 
+    ngf: 32, 
     netG: "unet_64",
     norm: "instance"
   },
   discriminator: {
-    input_nc: 1, # unpaired
-    ndf: 64, 
+    input_nc: 2, # conditional 
+    ndf: 32, 
     netD: "basic",
     norm: "instance"
   }

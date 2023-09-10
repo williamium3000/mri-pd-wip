@@ -22,6 +22,7 @@ class UNet3D(nn.Module):
         self.up2 = upSample(base_channels * 8, (base_channels * 4) // factor, bilinear)
         self.up3 = upSample(base_channels * 4, (base_channels * 2) // factor, bilinear)
         self.up4 = upSample(base_channels * 2, in_channels, bilinear)
+        self.out_sigmoid = nn.Sigmoid()
         
     def forward(self, x):
         self._check_input_divisible(x)
@@ -36,9 +37,9 @@ class UNet3D(nn.Module):
         out4 = self.up4(out3, x1)
         
         if self.add_residual:
-            return out4 + x
+            return self.out_sigmoid(out4) + x
         else:
-            return out4
+            return self.out_sigmoid(out4)
     def _check_input_divisible(self, x):
         h, w, z = x.shape[-3:]
         whole_downsample_rate = 1

@@ -23,7 +23,7 @@ class UNet2D(nn.Module):
         self.up2 = upSample(base_channels * 8, (base_channels * 4) // factor, bilinear, nearest)
         self.up3 = upSample(base_channels * 4, (base_channels * 2) // factor, bilinear, nearest)
         self.up4 = upSample(base_channels * 2, in_channels, bilinear, nearest)
-        
+        self.out_sigmoid = nn.Sigmoid()
     def forward(self, x):
         self._check_input_divisible(x)
         x1 = self.two_convs(x)
@@ -36,9 +36,9 @@ class UNet2D(nn.Module):
         out3 = self.up3(out2, x2)
         out4 = self.up4(out3, x1)
         if self.add_residual:
-            return out4 + x
+            return self.out_sigmoid(out4) + x
         else:
-            return out4
+            return self.out_sigmoid(out4)
         
     def _check_input_divisible(self, x):
         h, w = x.shape[-2:]

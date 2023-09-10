@@ -155,11 +155,13 @@ def main():
                 pred_B = model(real_A)
                 l1_loss = criterionL1(pred_B, real_B) 
                 l2_loss = criterionL2(pred_B, real_B)
-                loss = l1_loss + l2_loss
+                ssim_loss = 1- criterionSSIM(pred_B, real_B)
+                loss = l1_loss + l2_loss + ssim_loss
             
             total_loss += loss.clone().detach().item()
             total_l1 += l1_loss.clone().detach().item()
             total_l2 += l2_loss.clone().detach().item()
+            total_ssim += ssim_loss.clone().detach().item()
             #############################################
             #                   update D
             #############################################
@@ -186,10 +188,11 @@ def main():
                 scheduler.step()
 
             if ((i % 20) == 0) and (rank == 0):
-                logger.info('Iters: {:}/ {:}, lr: {:.6f}, total loss: {:.3f}, l1 loss: {:.3f}, l2 loss: {:.3f}'.format(
+                logger.info('Iters: {:}/ {:}, lr: {:.6f}, total loss: {:.3f}, l1 loss: {:.3f}, l2 loss: {:.3f}, ssim loss: {:.3f}'.format(
                     i, len(trainloader), optimizer.param_groups[0]['lr'], total_loss / (i+1), 
                     total_l1 / (i+1), 
-                    total_l2 / (i+1)
+                    total_l2 / (i+1),
+                    total_ssim / (i+1)
                     ))
 
         if "scheduler" in cfg and cfg["lr_decay_per_epoch"]:

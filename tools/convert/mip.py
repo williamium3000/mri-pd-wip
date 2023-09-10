@@ -8,8 +8,8 @@ import argparse
 
 # %matplotlib inline
 parser = argparse.ArgumentParser(description='turn the nifti file into mip')
-parser.add_argument('--src-dir',type=str)
-parser.add_argument('--out-dir',type=str)
+parser.add_argument('src_dir',type=str)
+parser.add_argument('out_dir',type=str)
 parser.add_argument('--slices_num', type=int, default=16)
 
 args = parser.parse_args()

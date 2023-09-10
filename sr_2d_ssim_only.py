@@ -125,8 +125,7 @@ def main():
     start_epoch = 0
     previous_best = 0.0
     
-    criterionL1 = torch.nn.L1Loss()
-    criterionL2 = torch.nn.MSELoss()
+
     criterionSSIM = StructuralSimilarityIndexMeasure(data_range=1.0).cuda()
     
     
@@ -140,9 +139,6 @@ def main():
             logger.info('===========> Epoch: {:}, LR: {:.6f}, Previous best: {:.2f}'.format(
                 epoch, optimizer.param_groups[0]['lr'], previous_best))
         total_loss = 0.0
-        total_l1 = 0.0
-        total_l2 = 0.0
-        total_ssim = 0.0
 
         trainsampler.set_epoch(epoch)
         
@@ -153,13 +149,11 @@ def main():
             with autocast(enabled=scalar is not None):
                 real_A, real_B = real_A.cuda(), real_B.cuda()
                 pred_B = model(real_A)
-                l1_loss = criterionL1(pred_B, real_B) 
-                l2_loss = criterionL2(pred_B, real_B)
-                loss = l1_loss + l2_loss
+                ssim_loss = 1- criterionSSIM(pred_B, real_B)
+                loss = ssim_loss
             
             total_loss += loss.clone().detach().item()
-            total_l1 += l1_loss.clone().detach().item()
-            total_l2 += l2_loss.clone().detach().item()
+
             #############################################
             #                   update D
             #############################################
@@ -186,10 +180,8 @@ def main():
                 scheduler.step()
 
             if ((i % 20) == 0) and (rank == 0):
-                logger.info('Iters: {:}/ {:}, lr: {:.6f}, total loss: {:.3f}, l1 loss: {:.3f}, l2 loss: {:.3f}'.format(
-                    i, len(trainloader), optimizer.param_groups[0]['lr'], total_loss / (i+1), 
-                    total_l1 / (i+1), 
-                    total_l2 / (i+1)
+                logger.info('Iters: {:}/ {:}, lr: {:.6f}, total loss: {:.3f}'.format(
+                    i, len(trainloader), optimizer.param_groups[0]['lr'], total_loss / (i+1)
                     ))
 
         if "scheduler" in cfg and cfg["lr_decay_per_epoch"]:

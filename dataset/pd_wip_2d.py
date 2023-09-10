@@ -1,4 +1,4 @@
-from dataset.transform3d import *
+from dataset.paired_transform3d import *
 
 from copy import deepcopy
 import math

@@ -13,13 +13,15 @@ from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader
 import yaml
 from dataset.pd_wip_2d import PDWIP2DDataset
+from model.builder import build_model
 from model.pix2pix import networks2d
+
 from model.pix2pix.image_pool import ImagePool
 from util.utils import count_params, init_log
 from util.scheduler import *
 from util.dist_helper import setup_distributed
 
-from eval2d import evaluate_2d
+from evaluate import evaluate_2d
 from dataset.pd_wip_3d import PDWIP3DDataset
 
 parser = argparse.ArgumentParser(description='Medical image segmentation in 3D')
@@ -79,10 +81,13 @@ def main():
     cudnn.benchmark = True
 
     
-    model_G_AB = networks2d.define_G(**cfg["generator"])
-    model_G_BA = networks2d.define_G(**cfg["generator"])
-    model_D_AB = networks2d.define_D(**cfg["discriminator"])
-    model_D_BA = networks2d.define_D(**cfg["discriminator"])
+    # model_G_AB = networks2d.define_G(**cfg["generator"])
+    # model_G_BA = networks2d.define_G(**cfg["generator"])
+    # model_D_AB = networks2d.define_D(**cfg["discriminator"])
+    # model_D_BA = networks2d.define_D(**cfg["discriminator"])
+    
+    model_G_AB, model_D_AB = build_model(cfg)
+    model_G_BA, model_D_BA = build_model(cfg)
     
     if rank == 0:
         logger.info('Total params: {:.1f}M\n'.format(count_params(model_G_AB) + count_params(model_G_BA) + count_params(model_D_AB) + count_params(model_D_BA)))

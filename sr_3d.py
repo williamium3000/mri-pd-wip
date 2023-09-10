@@ -12,12 +12,12 @@ from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader
 import yaml
 
-from model.backbone.unet3d import UNet3D
+from model.builder import build_model
 from util.utils import count_params, init_log
 from util.scheduler import *
 from util.dist_helper import setup_distributed
 
-from eval3d import evaluate_3d
+from evaluate import evaluate_3d
 from dataset.pd_wip_3d import PDWIP3DDataset
 from torch.cuda.amp import autocast, GradScaler
 from torchmetrics.image import StructuralSimilarityIndexMeasure
@@ -58,7 +58,7 @@ def main():
     cudnn.benchmark = True
 
     
-    model = UNet3D(**cfg["model"])
+    model, _ = build_model(cfg)
     
     if rank == 0:
         logger.info('Total params: {:.1f}M\n'.format(count_params(model)))
@@ -77,7 +77,7 @@ def main():
         mode="train",
         pd_root=cfg['train_pd_root'],
         wip_root=cfg['train_wip_root'],
-        list=args.train_id_path)
+        list=args.train_id_path, return_name=True)
     
     valset = PDWIP3DDataset(
         cfg=cfg,
@@ -87,11 +87,11 @@ def main():
         list=args.val_id_path, return_name=True)
     
     
-    trainsampler = torch.utils.data.distributed.DistributedSampler(trainset)
+    trainsampler = torch.utils.data.distributed.DistributedSampler(trainset, shuffle=True)
     trainloader = DataLoader(trainset, batch_size=cfg['batch_size'],
                              pin_memory=True, num_workers=2, drop_last=True, sampler=trainsampler)
     
-    valsampler = torch.utils.data.distributed.DistributedSampler(valset)
+    valsampler = torch.utils.data.distributed.DistributedSampler(valset, shuffle=False)
     valloader = DataLoader(valset, batch_size=1,
                              pin_memory=True, num_workers=2, drop_last=False, sampler=valsampler)
     
@@ -126,8 +126,7 @@ def main():
     
     criterionL1 = torch.nn.L1Loss()
     criterionL2 = torch.nn.MSELoss()
-    criterionSSIM = StructuralSimilarityIndexMeasure(data_range=1.0).cuda()
-    
+ 
     
     if args.amp:
         scalar = GradScaler()
@@ -141,26 +140,27 @@ def main():
         total_loss = 0.0
         total_l1 = 0.0
         total_l2 = 0.0
-        total_ssim = 0.0
 
         trainsampler.set_epoch(epoch)
         
-        for i, (real_A, real_B) in enumerate(trainloader):
+        for i, (real_A, real_B, name) in enumerate(trainloader):
             model.train()
             optimizer.zero_grad()
-            
             with autocast(enabled=scalar is not None):
                 real_A, real_B = real_A.cuda(), real_B.cuda()
                 pred_B = model(real_A)
+                if torch.isnan(pred_B).any():
+                    print("pred_b:", pred_B, name)
+                if torch.isnan(real_B).any():
+                    print("real_B:", real_B, name)
+                    
                 l1_loss = criterionL1(pred_B, real_B) 
                 l2_loss = criterionL2(pred_B, real_B)
-                sim_loss = criterionSSIM(pred_B, real_B)
-                loss = l1_loss + l2_loss + 10 * sim_loss
-            
+                loss = l1_loss + l2_loss
+                
             total_loss += loss.clone().detach().item()
             total_l1 += l1_loss.clone().detach().item()
             total_l2 += l2_loss.clone().detach().item()
-            total_ssim += sim_loss.clone().detach().item()
             #############################################
             #                   update D
             #############################################
@@ -182,16 +182,15 @@ def main():
                 
                 optimizer.step()
             
-
+            # dist.barrier()
             if "scheduler" in cfg and cfg["lr_decay_per_step"]:
                 scheduler.step()
 
-            if ((i % 20) == 0) and (rank == 0):
-                logger.info('Iters: {:}/ {:}, lr: {:.6f}, total loss: {:.3f}, l1 loss: {:.3f}, l2 loss: {:.3f}, ssim loss: {:.3f}'.format(
+            if ((i % 5) == 0) and (rank == 0):
+                logger.info('Iters: {:}/ {:}, lr: {:.6f}, total loss: {:.3f}, l1 loss: {:.3f}, l2 loss: {:.3f}'.format(
                     i, len(trainloader), optimizer.param_groups[0]['lr'], total_loss / (i+1), 
                     total_l1 / (i+1), 
                     total_l2 / (i+1), 
-                    total_ssim / (i+1), 
                     ))
 
         if "scheduler" in cfg and cfg["lr_decay_per_epoch"]:
@@ -212,15 +211,15 @@ def main():
                     "model": model.module.state_dict()},
                                 os.path.join(args.save_path, f'epoch{epoch}.pth'))
             if sum([psnr, ssim]) / 2 > previous_best:
-                if os.path.exists(os.path.join(args.save_path, 'best_{:.2f}.pth'.format(previous_best))):
-                    os.remove(os.path.join(args.save_path, 'best_{:.2f}.pth'.format(previous_best)))
+                if os.path.exists(os.path.join(args.save_path, 'best_{:.4f}.pth'.format(previous_best))):
+                    os.remove(os.path.join(args.save_path, 'best_{:.4f}.pth'.format(previous_best)))
                 previous_best = sum([psnr, ssim]) / 2
                 torch.save({
                     "model": model.module.state_dict()},
                                 os.path.join(args.save_path, 'best_{:.4f}.pth'.format(previous_best)))
-    torch.save({
-        "model": model.module.state_dict()},
-                    os.path.join(args.save_path, 'last.pth'))
+            torch.save({
+                "model": model.module.state_dict()},
+                            os.path.join(args.save_path, 'last.pth'))
 
 
 if __name__ == '__main__':

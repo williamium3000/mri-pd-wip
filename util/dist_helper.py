@@ -3,7 +3,7 @@ import subprocess
 
 import torch
 import torch.distributed as dist
-
+import datetime
 
 def setup_distributed(backend="nccl", port=None):
     """AdaHessian Optimizer
@@ -38,6 +38,6 @@ def setup_distributed(backend="nccl", port=None):
     dist.init_process_group(
         backend=backend,
         world_size=world_size,
-        rank=rank,
+        rank=rank
     )
     return rank, world_size

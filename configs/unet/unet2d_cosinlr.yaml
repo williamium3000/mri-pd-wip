@@ -19,8 +19,13 @@ scheduler:
 lr_decay_per_epoch: false
 lr_decay_per_step: true
 
+
 model: {
-  in_channels: 1,
-  base_channels: 64,
-  add_residual: true
+  name: "unet2d",
+  kwargs: {
+    in_channels: 1,
+    base_channels: 16,
+    add_residual: true
+  }
 }
+

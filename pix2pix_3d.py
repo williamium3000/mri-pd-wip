@@ -19,7 +19,7 @@ from util.utils import count_params, init_log
 from util.scheduler import *
 from util.dist_helper import setup_distributed
 
-from evaluate import evaluate_2d
+from evaluate import evaluate_3d
 from dataset.pd_wip_3d import PDWIP3DDataset
 
 parser = argparse.ArgumentParser(description='Medical image segmentation in 3D')
@@ -74,7 +74,7 @@ def main():
     else:
         raise NotImplementedError(f'{cfg["optim"]} not implemented')
     
-    trainset = PDWIP2DDataset(
+    trainset = PDWIP3DDataset(
         cfg=cfg,
         mode="train",
         pd_root=cfg['train_pd_root'],
@@ -203,7 +203,7 @@ def main():
         model_G.eval()
         with torch.no_grad():
             psnr, ssim, mse, l1 = \
-                evaluate_2d(args, model_G, valloader, True)
+                evaluate_3d(args, model_G, valloader, True)
         
         if rank == 0:
             logger.info(
@@ -215,17 +215,17 @@ def main():
                     "model_D": model_D.module.state_dict()},
                                 os.path.join(args.save_path, f'epoch{epoch}.pth'))
             if sum([psnr, ssim]) / 2 > previous_best:
-                if os.path.exists(os.path.join(args.save_path, 'best_{:.2f}.pth'.format(previous_best))):
-                    os.remove(os.path.join(args.save_path, 'best_{:.2f}.pth'.format(previous_best)))
+                if os.path.exists(os.path.join(args.save_path, 'best_{:.4f}.pth'.format(previous_best))):
+                    os.remove(os.path.join(args.save_path, 'best_{:.4f}.pth'.format(previous_best)))
                 previous_best = sum([psnr, ssim]) / 2
                 torch.save({
                     "model_G": model_G.module.state_dict(),
                     "model_D": model_D.module.state_dict()},
                                 os.path.join(args.save_path, 'best_{:.4f}.pth'.format(previous_best)))
-    torch.save({
-        "model_G": model_G.module.state_dict(),
-        "model_D": model_D.module.state_dict()},
-                    os.path.join(args.save_path, 'last.pth'))
+            torch.save({
+                "model_G": model_G.module.state_dict(),
+                "model_D": model_D.module.state_dict()},
+                            os.path.join(args.save_path, 'last.pth'))
 
 
 if __name__ == '__main__':

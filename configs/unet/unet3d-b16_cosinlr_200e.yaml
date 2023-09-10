@@ -6,7 +6,7 @@ val_wip_root: data/new_pd_wip/v6/wip_registration
 
 # arguments for training
 optim: AdamW
-epochs: 20
+epochs: 200
 batch_size: 1
 lr: 0.0002  # 4GPUs
 crop_size: 128
@@ -15,14 +15,15 @@ scheduler:
   kwargs:
     T_max: 1080
     eta_min: 0.0
-    
+norm_type: "sample_max"
+quantile_clip: false
 lr_decay_per_epoch: false
 lr_decay_per_step: true
 model: {
   name: "unet3d",
   kwargs: {
     in_channels: 1,
-    base_channels: 64,
+    base_channels: 16,
     add_residual: true
   }
 }

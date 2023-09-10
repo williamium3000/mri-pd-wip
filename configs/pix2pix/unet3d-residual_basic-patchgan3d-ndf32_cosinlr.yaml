@@ -1,0 +1,43 @@
+# arguments for dataset
+train_pd_root: data/new_pd_wip/v6/pd_paired
+train_wip_root: data/new_pd_wip/v6/wip_registration
+val_pd_root: data/new_pd_wip/v6/pd_paired
+val_wip_root: data/new_pd_wip/v6/wip_registration
+
+# arguments for training
+optim: Adam
+epochs: 50
+batch_size: 1
+lr: 0.0002  # 1GPUs
+
+scheduler: 
+  name: CosineAnnealingLR
+  kwargs:
+    T_max: 8580
+    eta_min: 0.0
+    
+lr_decay_per_epoch: false
+lr_decay_per_step: true
+
+lambda_L1: 10.0
+crop_size: 128
+model: {
+  name: "my_pix2pix",
+  generator: {
+    name: "unet3d",
+    kwargs: {
+      in_channels: 1,
+      base_channels: 16,
+      add_residual: true
+    }
+  },
+  discriminator: {
+    name: "patch3d",
+    kwargs: {
+      input_nc: 2, # conditional 
+      ndf: 16, 
+      norm: "instance",
+      n_layers: 3
+    }
+  }
+}
