@@ -1,23 +1,24 @@
 # arguments for dataset
-train_pd_root: data/new_pd_wip/v6/pd_paired
-train_wip_root: data/new_pd_wip/v6/wip_registration
-val_pd_root: data/new_pd_wip/v6/pd_paired
-val_wip_root: data/new_pd_wip/v6/wip_registration
+train_pd_root: data/pd_wip/pd_nifti_final/train
+train_wip_root: data/pd_wip/wip_registration_nifti/train
+val_pd_root: data/pd_wip/pd_nifti_final/test
+val_wip_root: data/pd_wip/wip_registration_nifti/test
 
 # arguments for training
 optim: AdamW
 epochs: 50
 batch_size: 1
-lr: 0.0004  # 4GPUs
+lr: 0.0001  # 4GPUs
 crop_size: 128
 scheduler: 
   name: CosineAnnealingLR
   kwargs:
-    T_max: 3750
+    T_max: 2700
     eta_min: 0.0
 
 norm_type: "sample_max"
 quantile_clip: false
+use_augmentation: false
 
 lr_decay_per_epoch: false
 lr_decay_per_step: true
@@ -25,8 +26,7 @@ model: {
   name: "unet3d",
   kwargs: {
     in_channels: 1,
-    base_channels: 32,
-    add_residual: true
+    base_channels: 16,
+    add_residual: false
   }
 }
-

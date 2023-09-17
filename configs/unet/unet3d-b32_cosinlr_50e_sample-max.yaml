@@ -18,6 +18,7 @@ scheduler:
 
 norm_type: "sample_max"
 quantile_clip: false
+use_augmentation: false
 
 lr_decay_per_epoch: false
 lr_decay_per_step: true

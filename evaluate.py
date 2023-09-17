@@ -58,10 +58,9 @@ def evaluate_3d(args, model_G, dataloader, dist_eval):
         
         if args.save:
             fake_B = fake_B.squeeze(0).squeeze(0).detach().cpu().permute(0, 2, 1).numpy()
-            if(np.iscomplex(fake_B).any()):
-                fake_B = abs(fake_B)
-            nii = nib.Nifti1Image(fake_B, np.eye(4)) 
-            nib.save(nii, os.path.join(args.out_dir, real_B_name[0]))
+            ori_data = nib.load(real_B_name[0]) 
+            nii = nib.Nifti1Image(fake_B, ori_data.affine, ori_data.header) 
+            nib.save(nii, os.path.join(args.out_dir, os.path.basename(real_B_name[0])))
     
     if dist_eval:
         dist.all_reduce(total_psnr)
@@ -103,10 +102,9 @@ def evaluate_2d(args, model, dataloader, dist_eval):
         
         if args.save:
             fake_B = fake_B.permute(1, 2, 3, 0).detach().cpu().squeeze(0).permute(0, 2, 1).numpy()
-            if(np.iscomplex(fake_B).any()):
-                fake_B = abs(fake_B)
-            nii = nib.Nifti1Image(fake_B, np.eye(4)) 
-            nib.save(nii, os.path.join(args.out_dir, real_B_name[0]))
+            ori_data = nib.load(real_B_name[0]) 
+            nii = nib.Nifti1Image(fake_B, ori_data.affine, ori_data.header) 
+            nib.save(nii, os.path.join(args.out_dir, os.path.basename(real_B_name[0])))
     
     
     if dist_eval:
