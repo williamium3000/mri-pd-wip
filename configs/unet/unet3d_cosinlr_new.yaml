@@ -1,19 +1,19 @@
 # arguments for dataset
-train_pd_root: data/pd_wip/pd_nifti_final/train
-train_wip_root: data/pd_wip/wip_registration_nifti/train
-val_pd_root: data/pd_wip/pd_nifti_final/test
-val_wip_root: data/pd_wip/wip_registration_nifti/test
+train_pd_root: data/new_pd_wip/v6/pd_paired
+train_wip_root: data/new_pd_wip/v6/wip_registration
+val_pd_root: data/new_pd_wip/v6/pd_paired
+val_wip_root: data/new_pd_wip/v6/wip_registration
 
 # arguments for training
 optim: AdamW
 epochs: 50
 batch_size: 1
 lr: 0.0002  # 1GPUs
-
+crop_size: 128
 scheduler: 
   name: CosineAnnealingLR
   kwargs:
-    T_max: 8580
+    T_max: 3750
     eta_min: 0.0
     
 lr_decay_per_epoch: false
@@ -21,6 +21,6 @@ lr_decay_per_step: true
 
 model: {
   in_channels: 1,
-  base_channels: 64,
+  base_channels: 32,
   add_residual: true
 }

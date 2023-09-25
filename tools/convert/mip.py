@@ -8,8 +8,8 @@ import argparse
 
 # %matplotlib inline
 parser = argparse.ArgumentParser(description='turn the nifti file into mip')
-parser.add_argument('--src-dir',type=str)
-parser.add_argument('--out-dir',type=str)
+parser.add_argument('src_dir',type=str)
+parser.add_argument('out_dir',type=str)
 parser.add_argument('--slices_num', type=int, default=16)
 
 args = parser.parse_args()
@@ -23,9 +23,9 @@ def create_mip(np_img, slices_num):
     #np_img = np_img.transpose(1, 0, 2)
     img_shape = np_img.shape
     np_mip = np.zeros(img_shape)
-    for i in range(img_shape[0]):
+    for i in range(img_shape[1]):
         start = max(0, i - slices_num)
-        np_mip[i, :, :] = np.amin(np_img[start:i + 1], 0)
+        np_mip[:, i, :] = np.amin(np_img[:, start:i + 1, :], 1)
     return np_mip#.transpose(1, 0, 2)
 
 

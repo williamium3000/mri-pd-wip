@@ -5,20 +5,22 @@ import random
 from torchvision.transforms import functional as F
 import torch
 
-class MinMaxNormalize():
+class PairedMinMaxNormalize():
     """Apply min max normalization to image
     """
     def __call__(self, input):
-        image, mask = input[0], input[1]
-        image = (image - np.min(image)) / (np.max(image) - np.min(image))
-        return (image, mask)
+        image1, image2 = input[0], input[1]
+        image1 = (image1 - np.min(image1)) / (np.max(image1) - np.min(image1))
+        image2 = (image2 - np.min(image2)) / (np.max(image2) - np.min(image2))
+        return (image1, image2)
+    
 class Identity():
     """Apply min max normalization to image
     """
     def __call__(self, input):
         return input
     
-class StdNormalize():
+class PairedStdNormalize():
     """Normalize each image to with mean and std.
 
     Args:
@@ -31,30 +33,38 @@ class StdNormalize():
         self.std = std
 
     def __call__(self, input):
-        image, mask = input[0], input[1]
-        c = image.shape[-1]
+        image1, image2 = input[0], input[1]
+        c = image1.shape[-1]
         if self.mean is None:
-            mean = np.mean(image.reshape(-1, c), axis=0)
+            mean1 = np.mean(image1.reshape(-1, c), axis=0)
+            mean2 = np.mean(image2.reshape(-1, c), axis=0)
         else:
-            mean = np.array(mean)
+            mean1 = np.array(self.mean)
+            mean2 = np.array(self.mean)
         if self.std is None:
-            std = np.std(image.reshape(-1, c), axis=0)
+            std1 = np.std(image1.reshape(-1, c), axis=0)
+            std2 = np.std(image2.reshape(-1, c), axis=0)
         else:
-            std = np.array(std)
+            std1 = np.array(self.std)
+            std2 = np.array(self.std)
         
-        image = (image - mean) / std
-        return (image, mask)
-class NoneZeroRegion3D():
+        image1 = (image1 - mean1) / std1
+        image2 = (image2 - mean2) / std2
+        return (image1, image2)
+    
+class PairedNoneZeroRegion3D():
     """Extract none-zero region. This only works on 3D images (4D tensor)
     """
     def __call__(self, input):
-        image, mask = input[0], input[1]
-        assert len(image.shape) == 4, "ExtractRegion3D only works on 3D images (4D tensor)"
+        image1, image2 = input[0], input[1]
+        assert (len(image1.shape) == 4) and (len(image2.shape) == 4), "ExtractRegion3D only works on 3D images (4D tensor)"
         
-        nonzero_mask = np.zeros(image.shape[:-1], dtype=bool)
-        for c in range(image.shape[-1]):
-            mask_c = image[:, :, :, c] != 0
-            nonzero_mask = nonzero_mask | mask_c
+        nonzero_mask = np.zeros(image1.shape[:-1], dtype=bool)
+        for c in range(image1.shape[-1]):
+            mask_c1 = image1[:, :, :, c] != 0
+            mask_c2 = image2[:, :, :, c] != 0
+            nonzero_mask = nonzero_mask | mask_c1 | mask_c2
+            
         nonzero_mask = binary_fill_holes(nonzero_mask)
 
         mask_voxel_coords = np.where(nonzero_mask != 0)
@@ -66,42 +76,22 @@ class NoneZeroRegion3D():
         maxzidx = int(np.max(mask_voxel_coords[2])) + 1
         bbox = [[minxidx, maxxidx], [minyidx, maxyidx], [minzidx, maxzidx]]
 
-        image = image[
+        image1 = image1[
             bbox[0][0]: bbox[0][1],
             bbox[1][0]: bbox[1][1],
             bbox[2][0]: bbox[2][1],
             :
         ]
 
-        mask = mask[
+        image2 = image2[
             bbox[0][0]: bbox[0][1],
             bbox[1][0]: bbox[1][1],
             bbox[2][0]: bbox[2][1]
         ]
         
-        return (image, mask)
+        return (image1, image2)
 
-class RemoveBackgroundSlices():
-    """Remove slices contraining background label. This only works on 3D images (4D tensor)
-
-    """
-
-    def __init__(self, id=0):
-        self.id = id
-
-    def __call__(self, input):
-        image, mask = input[0], input[1]
-        assert len(image.shape) == 4, "RemoveBackgroundSlices only works on 3D images (4D tensor)"
-        
-        # drop slices without any label
-        z_mask = np.any(mask != self.id, axis=(0, 1))  
-              
-        image = image[:, :, z_mask, :]
-        mask = mask[:, :, z_mask]
-
-        return (image, mask)
-
-class RandomCrop3D():
+class PairedRandomCrop3D():
     """Random Crop for 3D medical image. This transform makes
     sure that the output is absolutely in the size of the crop_size
     given. If any dimension of the input image is less than crop_size,
@@ -111,51 +101,49 @@ class RandomCrop3D():
         crop_size (tuple | None): crop size.
     """
 
-    def __init__(self, crop_size, pad_val=0, seg_pad_val=255):
+    def __init__(self, crop_size, pad_val=0):
         if isinstance(crop_size, int):
             crop_size = [crop_size] * 3
         self.crop_size = crop_size
         self.pad_val = pad_val
-        self.seg_pad_val = seg_pad_val
 
     def __call__(self, input):
-        image, mask = input[0], input[1]
+        image1, image2 = input[0], input[1]
         crop_h, crop_w, crop_z = self.crop_size
-        h, w, z, _ = image.shape
+        h, w, z, _ = image1.shape
         # first pad to sizes larger than crop size
-        image = np.pad(
-            image,
+        image1 = np.pad(
+            image1,
             [(0, max(crop_h - h, 0)), (0, max(crop_w - w, 0)), (0, max(crop_z - z, 0)), (0, 0)],
             mode='constant',
             constant_values=self.pad_val)
-        mask = np.pad(
-            mask,
-            [(0, max(crop_h - h, 0)), (0, max(crop_w - w, 0)), (0, max(crop_z - z, 0))],
+        image2 = np.pad(
+            image2,
+            [(0, max(crop_h - h, 0)), (0, max(crop_w - w, 0)), (0, max(crop_z - z, 0)), (0, 0)],
             mode='constant',
-            constant_values=self.seg_pad_val)
-        
+            constant_values=self.pad_val)
         # random crop to crop size
-        h, w, z, _ = image.shape
+        h, w, z, _ = image1.shape
         sagittal = np.random.randint(0, h - crop_h + 1)
         coronal = np.random.randint(0, w - crop_w + 1)
         axial = np.random.randint(0, z - crop_z + 1)
         
-        image = image[
+        image1 = image1[
             sagittal:sagittal + crop_h,
             coronal:coronal + crop_w,
             axial:axial + crop_z,
             :
         ]
-        mask = mask[
+        image2 = image2[
             sagittal:sagittal + crop_h,
             coronal:coronal + crop_w,
-            axial:axial + crop_z
+            axial:axial + crop_z,
+            :
         ]
-
-        return (image, mask)
+        return (image1, image2)
     
 
-class RandomRotation3d():
+class PairedRandomRotation3d():
     """Rotate the image for a random degree.
     """
 
@@ -166,19 +154,19 @@ class RandomRotation3d():
         if not isinstance(degree, (tuple, list)):
             self.degree = (degree, -degree)
     def __call__(self, input):
-        image, mask = input[0], input[1]
+        image1, image2 = input[0], input[1]
         if np.random.rand() < self.prob:
             if self.plane is None:
                 plane = random.choice([(0, 1), (1, 2), (0, 2)])
             else:
                 plane = self.plane
             angle = random.uniform(a=self.degree[0], b=self.degree[1])
-            image = ndimage.rotate(image, angle, axes=plane, reshape=False, order=0)
-            mask = ndimage.rotate(mask, angle, axes=plane, reshape=False, order=0)
-        return (image, mask)
+            image1 = ndimage.rotate(image1, angle, axes=plane, reshape=False, order=0)
+            image2 = ndimage.rotate(image2, angle, axes=plane, reshape=False, order=0)
+        return (image1, image2)
     
      
-class RandomRotation90n3d():
+class PairedRandomRotation90n3d():
     """Random rotate the image 90 degree for a maximum of k times
     (randomly choose the number of times).
     """
@@ -188,19 +176,20 @@ class RandomRotation90n3d():
         self.plane = plane
         self.max_k = max_k
     def __call__(self, input):
-        image, mask = input[0], input[1]
+        image1, image2 = input[0], input[1]
         if np.random.rand() < self.prob:
             if self.plane is None:
                 plane = random.choice([(0, 1), (1, 2), (0, 2)])
             else:
                 plane = self.plane
             k = np.random.randint(0, self.max_k)
-            image = np.rot90(image, k=k, axes=plane)
-            mask = np.rot90(mask, k=k, axes=plane,)
-        return (image, mask)
+            image1 = np.rot90(image1, k=k, axes=plane)
+            image2 = np.rot90(image2, k=k, axes=plane,)
+        return (image1, image2)
     
 
-class Pad3D(object):
+
+class PairedPad3D(object):
     """Pad the image & mask for 3D input to given size or the
     minimum size that is divisible by some number. If any dimension of the 
     3D image is already larger than given pad size, this dimension will 
@@ -249,18 +238,6 @@ class Pad3D(object):
                 constant_values=self.pad_val)
         return padded_img
 
-    def _pad_seg(self, padded_img, mask):
-        """Pad masks according to ``results['pad_shape']``."""
-        h, w, z = mask.shape
-        pad_h, pad_w, pad_z, _ = padded_img.shape
-        padded_mask = np.pad(
-            mask,
-            [(0, max(pad_h - h, 0)), (0, max(pad_w - w, 0)), (0, max(pad_z - z, 0))],
-            mode='constant',
-            constant_values=self.seg_pad_val
-        )
-        return padded_mask
-
     def __call__(self, input):
         """Call function to pad images, masks, semantic segmentation maps.
 
@@ -270,13 +247,14 @@ class Pad3D(object):
         Returns:
             dict: Updated result dict.
         """
-        image, mask = input[0], input[1]
-        padded_image = self._pad_img(image)
-        padded_mask = self._pad_seg(padded_image, mask)
-        return (padded_image, padded_mask)
+        image1, image2 = input[0], input[1]
+        padded_image1 = self._pad_img(image1)
+        padded_image2 = self._pad_img(image2)
+
+        return (padded_image1, padded_image2)
 
 
-class RandomFlip3D():
+class PairedRandomFlip3D():
     """Random flip for 3D image.
 
     Args:
@@ -299,7 +277,7 @@ class RandomFlip3D():
             
         return input
     def flip_image(self, input, flip_direction):
-        image, mask = input[0], input[1]
+        image1, image2 = input[0], input[1]
         if flip_direction == 'horizontal':
             axis = 1
         elif flip_direction == 'vertical':
@@ -307,12 +285,12 @@ class RandomFlip3D():
         elif flip_direction == 'inferior':
             axis = 2
         
-        image = np.flip(image, axis=axis).copy()
-        mask = np.flip(mask, axis=axis).copy()
-        return (image, mask)
+        image1 = np.flip(image1, axis=axis).copy()
+        image2 = np.flip(image2, axis=axis).copy()
+        return (image1, image2)
 
 
-class ToTensor3d:
+class PairedToTensor3d:
     """Convert a 3D ``numpy.ndarray`` to tensor (both image and mask).
 
     Converts a 3D image of numpy.ndarray (H x W x Z x C) to a torch.FloatTensor of 
@@ -331,7 +309,7 @@ class ToTensor3d:
         Returns:
             Tensor: Converted image.
         """
-        image, mask = input[0], input[1]
-        image = torch.from_numpy(image.transpose((3, 0, 1, 2))).float().contiguous()
-        mask = torch.from_numpy(mask.copy()).long()
-        return (image, mask)
+        image1, image2 = input[0], input[1]
+        image1 = torch.from_numpy(image1).permute(3, 0, 1, 2).float().contiguous()
+        image2 = torch.from_numpy(image2).permute(3, 0, 1, 2).float().contiguous()
+        return (image1, image2)

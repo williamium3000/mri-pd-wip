@@ -77,7 +77,7 @@ def main():
         mode="train",
         pd_root=cfg['train_pd_root'],
         wip_root=cfg['train_wip_root'],
-        list=args.train_id_path)
+        list=args.train_id_path, return_name=False)
     
     valset = PDWIP3DDataset(
         cfg=cfg,
@@ -126,8 +126,6 @@ def main():
     
     criterionL1 = torch.nn.L1Loss()
     criterionL2 = torch.nn.MSELoss()
-    criterionSSIM = StructuralSimilarityIndexMeasure(data_range=1.0).cuda()
-    
     
     if args.amp:
         scalar = GradScaler()
@@ -141,7 +139,6 @@ def main():
         total_loss = 0.0
         total_l1 = 0.0
         total_l2 = 0.0
-        total_ssim = 0.0
 
         trainsampler.set_epoch(epoch)
         
@@ -154,13 +151,11 @@ def main():
                 pred_B = model(real_A)
                 l1_loss = criterionL1(pred_B, real_B) 
                 l2_loss = criterionL2(pred_B, real_B)
-                sim_loss = criterionSSIM(pred_B, real_B)
-                loss = l1_loss + l2_loss + 10 * sim_loss
+                loss = l1_loss + l2_loss
             
             total_loss += loss.clone().detach().item()
             total_l1 += l1_loss.clone().detach().item()
             total_l2 += l2_loss.clone().detach().item()
-            total_ssim += sim_loss.clone().detach().item()
             #############################################
             #                   update D
             #############################################
@@ -186,12 +181,11 @@ def main():
             if "scheduler" in cfg and cfg["lr_decay_per_step"]:
                 scheduler.step()
 
-            if ((i % 20) == 0) and (rank == 0):
-                logger.info('Iters: {:}/ {:}, lr: {:.6f}, total loss: {:.3f}, l1 loss: {:.3f}, l2 loss: {:.3f}, ssim loss: {:.3f}'.format(
+            if ((i % 5) == 0) and (rank == 0):
+                logger.info('Iters: {:}/ {:}, lr: {:.6f}, total loss: {:.3f}, l1 loss: {:.3f}, l2 loss: {:.3f}'.format(
                     i, len(trainloader), optimizer.param_groups[0]['lr'], total_loss / (i+1), 
                     total_l1 / (i+1), 
-                    total_l2 / (i+1), 
-                    total_ssim / (i+1), 
+                    total_l2 / (i+1)
                     ))
 
         if "scheduler" in cfg and cfg["lr_decay_per_epoch"]:
@@ -205,7 +199,7 @@ def main():
         
         if rank == 0:
             logger.info(
-                '***** Evaluation ***** >>>> AVG(PSNR + SSIM):{:.2f}, PSNR: {:.2f}, SSIM: {:.2f} MSE: {:.4f}, L1: {:.4f}\n'.format(sum([psnr, ssim]) / 2, psnr, ssim, mse, l1))
+                '***** Evaluation ***** >>>> AVG(PSNR + SSIM):{:.2f}, PSNR: {:.2f}, SSIM: {:.2f} MSE: {:.4f}, L1: {:.4f}, total loss: {:.4f}\n'.format(sum([psnr, ssim]) / 2, psnr, ssim, mse, l1, l1 + mse))
 
             if args.save_feq is not None and (epoch + 1) % args.save_feq == 0:
                 torch.save({

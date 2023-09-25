@@ -49,29 +49,32 @@ def evaluate_3d(args, model_G, dataloader, dist_eval):
     for i, (real_A, real_B, real_B_name) in enumerate(tqdm.tqdm(dataloader)):
 
         real_A, real_B = real_A.cuda(), real_B.cuda() # 1, 1, 320, 320, 128
-
-        output = model_G(real_A)
-        total_psnr += psnr(real_B, output)
-        total_ssim += ssim(real_B, output)
-        total_mse += mean_squared_error(real_B, output)
-        total_l1 += (torch.abs(real_B - output)).mean()
+        fake_B = model_G(real_A) # 1, 1, 320, 320, 128
+        total_psnr += psnr(real_B, fake_B)
+        total_ssim += ssim(real_B, fake_B)
+        total_mse += mean_squared_error(real_B, fake_B)
+        total_l1 += (torch.abs(real_B - fake_B)).mean()
         total_num += 1
-        
         if args.save:
-            fake_B = fake_B.permute(1, 2, 3, 0).detach().cpu().squeeze(0).permute(0, 2, 1).numpy() * 1848.0 # scale back
+            fake_B = fake_B.squeeze(0).squeeze(0).detach().cpu().permute(0, 2, 1).numpy()
             if(np.iscomplex(fake_B).any()):
                 fake_B = abs(fake_B)
             nii = nib.Nifti1Image(fake_B, np.eye(4)) 
             nib.save(nii, os.path.join(args.out_dir, real_B_name[0]))
-    psnr, ssim, mse, l1 = total_psnr / total_num, total_ssim / total_num, total_mse / total_num, total_l1 / total_num
+    
     
     if dist_eval:
-        dist.all_reduce(psnr)
-        dist.all_reduce(ssim)
-        dist.all_reduce(mse)
-        dist.all_reduce(l1)
+        dist.all_reduce(total_psnr)
+        dist.all_reduce(total_ssim)
+        dist.all_reduce(total_mse)
+        dist.all_reduce(total_l1)
+        total_num = torch.tensor(total_num).cuda()
+        dist.all_reduce(total_num)
         dist.barrier()
+        
+    psnr, ssim, mse, l1 = total_psnr / total_num, total_ssim / total_num, total_mse / total_num, total_l1 / total_num
     return psnr, ssim, mse, l1
+
 
 def main():
     args = parser.parse_args()
