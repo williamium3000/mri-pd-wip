@@ -4,7 +4,7 @@ from tqdm import tqdm
 tool = "~/fsl/bin/flirt"
 params = "-bins 256 -cost corratio -searchrx -90 90 -searchry -90 90 -searchrz -90 90 -dof 12  -interp trilinear"
 
-pd_dir = "data/new_pd_wip/v6/pd_paired"
+pd_dir = "data/new_pd_wip/v6/pd_space"
 wip_dir = "data/new_pd_wip/v6/wip_space"
 out_dir = "data/new_pd_wip/v6/wip_registration"
 omat_dir = "data/new_pd_wip/v6/omat_wip_registration"
