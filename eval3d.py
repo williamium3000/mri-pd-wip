@@ -23,7 +23,7 @@ from util.scheduler import *
 from util.dist_helper import setup_distributed
 from torchmetrics.image import StructuralSimilarityIndexMeasure, PeakSignalNoiseRatio
 from torchmetrics.regression import MeanSquaredError
-
+from model.backbone.unet3d import UNet3D
 
 parser = argparse.ArgumentParser(description='Medical image segmentation in 3D')
 parser.add_argument('--config', type=str, required=True)
@@ -57,10 +57,9 @@ def evaluate_3d(args, model_G, dataloader, dist_eval):
         total_num += 1
         if args.save:
             fake_B = fake_B.squeeze(0).squeeze(0).detach().cpu().permute(0, 2, 1).numpy()
-            if(np.iscomplex(fake_B).any()):
-                fake_B = abs(fake_B)
-            nii = nib.Nifti1Image(fake_B, np.eye(4)) 
-            nib.save(nii, os.path.join(args.out_dir, real_B_name[0]))
+            ori_data = nib.load(real_B_name[0]) 
+            nii = nib.Nifti1Image(fake_B, ori_data.affine, ori_data.header) 
+            nib.save(nii, os.path.join(args.out_dir, os.path.basename(real_B_name[0])))
     
     
     if dist_eval:
@@ -91,7 +90,7 @@ def main():
     cudnn.benchmark = True
 
     
-    model_G = networks2d.define_G(**cfg["generator"])
+    model_G = model = UNet3D(**cfg["model"])
 
     valset = PDWIP3DDataset(
         cfg=cfg,
@@ -108,7 +107,7 @@ def main():
     model_G.cuda()
     model_G.eval()
     
-    args.out_dir = os.path.join(args.save_path, "results")
+    args.out_dir = args.save_path
     os.makedirs(args.out_dir, exist_ok=True)
     
     with torch.no_grad():

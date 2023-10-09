@@ -1,10 +1,10 @@
 #!/bin/bash
 now=$(date +"%Y%m%d_%H%M%S")
 
-config=configs/unet/unet3d_cosinlr_new.yaml
+config=configs/unet/unet3d_cosinlr_new_b64.yaml
 train_id_path=data/new_pd_wip/v6/pd_wip_3d_train_clean.txt
 val_id_path=data/new_pd_wip/v6/pd_wip_3d_test_clean.txt
-save_path=work_dirs/unet_3d/unet3d_cosinlr_new
+save_path=work_dirs/unet_3d/unet3d_cosinlr_new_b64
 
 mkdir -p $save_path
 
