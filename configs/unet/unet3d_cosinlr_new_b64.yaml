@@ -21,6 +21,6 @@ lr_decay_per_step: true
 
 model: {
   in_channels: 1,
-  base_channels: 64,
+  base_channels: 32,
   add_residual: true
 }
