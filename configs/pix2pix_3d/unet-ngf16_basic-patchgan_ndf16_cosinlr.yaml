@@ -8,19 +8,37 @@ val_wip_root: data/new_pd_wip/v6/wip_registration
 optim: AdamW
 epochs: 50
 batch_size: 1
-lr: 0.0002  # 1GPUs
-crop_size: 128
+lr: 0.00002  # 4GPUs
+
 scheduler: 
   name: CosineAnnealingLR
   kwargs:
-    T_max: 3750
+    T_max: 5000
     eta_min: 0.0
     
 lr_decay_per_epoch: false
 lr_decay_per_step: true
 
+lambda_L1: 2.0
+crop_size: 128
+
 model: {
-  in_channels: 1,
-  base_channels: 32,
-  add_residual: true
+  name: "my_pix2pix",
+  generator: {
+    name: "unet3d",
+    kwargs: {
+      in_channels: 1,
+      base_channels: 16,
+      add_residual: true
+    }
+  },
+  discriminator: {
+    name: "patch3d",
+    kwargs: {
+      input_nc: 2, # conditional 
+      ndf: 16, 
+      norm: "instance",
+      n_layers: 3
+    }
+  }
 }
