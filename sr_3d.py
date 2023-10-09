@@ -149,21 +149,11 @@ def main():
             with autocast(enabled=scalar is not None):
                 real_A, real_B = real_A.cuda(), real_B.cuda()
                 pred_B = model(real_A)
-                if torch.isnan(pred_B).any():
-                    print("pred_b:", pred_B, name)
-                if torch.isnan(real_B).any():
-                    print("real_B:", real_B, name)
                     
                 l1_loss = criterionL1(pred_B, real_B) 
                 l2_loss = criterionL2(pred_B, real_B)
                 loss = l1_loss + l2_loss
-                
-            total_loss += loss.clone().detach().item()
-            total_l1 += l1_loss.clone().detach().item()
-            total_l2 += l2_loss.clone().detach().item()
-            #############################################
-            #                   update D
-            #############################################
+                loss_rec = loss
             if scalar is not None:
                 loss = scalar.scale(loss)
                 loss.backward()
@@ -181,10 +171,14 @@ def main():
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip_grad_norm)
                 
                 optimizer.step()
-            
-            # dist.barrier()
+
             if "scheduler" in cfg and cfg["lr_decay_per_step"]:
                 scheduler.step()
+                
+            total_loss += loss_rec.clone().detach().item()
+            total_l1 += l1_loss.clone().detach().item()
+            total_l2 += l2_loss.clone().detach().item()
+           
 
             if ((i % 5) == 0) and (rank == 0):
                 logger.info('Iters: {:}/ {:}, lr: {:.6f}, total loss: {:.3f}, l1 loss: {:.3f}, l2 loss: {:.3f}'.format(
@@ -192,6 +186,12 @@ def main():
                     total_l1 / (i+1), 
                     total_l2 / (i+1), 
                     ))
+        if rank == 0:
+            logger.info('Epoch: {:}/ {:}, total loss: {:.3f}, l1 loss: {:.3f}, l2 loss: {:.3f}'.format(
+                        epoch, cfg['epochs'], total_loss / (i+1), 
+                        total_l1 / (i+1), 
+                        total_l2 / (i+1), 
+                        ))
 
         if "scheduler" in cfg and cfg["lr_decay_per_epoch"]:
             scheduler.step()
@@ -204,7 +204,7 @@ def main():
         
         if rank == 0:
             logger.info(
-                '***** Evaluation ***** >>>> AVG(PSNR + SSIM):{:.2f}, PSNR: {:.2f}, SSIM: {:.2f} MSE: {:.4f}, L1: {:.4f}\n'.format(sum([psnr, ssim]) / 2, psnr, ssim, mse, l1))
+                '***** Evaluation ***** >>>> AVG(PSNR + SSIM):{:.2f}, PSNR: {:.2f}, SSIM: {:.2f} MSE: {:.4f}, L1: {:.4f}, loss: {:.4f}\n'.format(sum([psnr, ssim]) / 2, psnr, ssim, mse, l1, l1 + mse))
 
             if args.save_feq is not None and (epoch + 1) % args.save_feq == 0:
                 torch.save({
